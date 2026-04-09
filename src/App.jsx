@@ -116,13 +116,19 @@ INSTRUCTIONS:
 
 Return ONLY this JSON object, nothing else, no markdown, no backticks:
 {
-  "name": "candidate full name",
-  "email": "email or null",
-  "phone": "phone or null",
+  "name": "candidate full legal name",
+  "email": "email address extracted from resume or null",
+  "phone": "phone/mobile number with country code if present or null",
+  "location": "city, state/country extracted from resume or null",
   "currentRole": "most recent job title",
+  "currentCompany": "most recent employer name or null",
   "totalExp": "X years Y months",
-  "skills": ["up to 8 skills found in resume"],
-  "education": "highest degree and institution",
+  "skills": ["up to 10 skills found in resume"],
+  "education": [
+    {"degree": "degree name", "institution": "college/university name", "year": "graduation year or null", "specialization": "field of study or null"}
+  ],
+  "certifications": ["list of certifications found or empty array"],
+  "languages": ["languages known or empty array"],
   "summary": "2 sentence professional summary",
   "fitScore": <overall 0-100 fit score>,
   "fitReason": "1 sentence overall fit explanation",
@@ -347,17 +353,29 @@ export default function App() {
         r.readAsDataURL(file);
       });
       const parsed = await parseResume(base64, uploadJob, jobs);
+      const eduRaw = parsed.education;
+      const eduStr = Array.isArray(eduRaw)
+        ? eduRaw.map(e=>`${e.degree||""} ${e.institution?`- ${e.institution}`:""}${e.year?` (${e.year})`:""}${e.specialization?`, ${e.specialization}`:""}`.trim()).join(" | ")
+        : (eduRaw||"—");
       const nc = {
         id: `c_${Date.now()}`,
         name: parsed.name || "Unknown",
         avatar: ini(parsed.name||"UC"),
         role: parsed.currentRole || "—",
+        currentCompany: parsed.currentCompany||"",
         exp: parsed.totalExp || "—",
         score: Math.min(100,Math.max(0,parsed.fitScore||50)),
         skills: parsed.skills||[],
-        email: parsed.email, phone: parsed.phone,
-        education: parsed.education, summary: parsed.summary,
-        fitReason: parsed.fitReason, redFlags: parsed.redFlags||[],
+        email: parsed.email||null,
+        phone: parsed.phone||null,
+        location: parsed.location||null,
+        education: eduStr,
+        educationDetail: Array.isArray(eduRaw)?eduRaw:[],
+        certifications: parsed.certifications||[],
+        languages: parsed.languages||[],
+        summary: parsed.summary,
+        fitReason: parsed.fitReason,
+        redFlags: parsed.redFlags||[],
         strengths: parsed.strengths||[],
         skillMatch: parsed.skillMatch||[],
         primaryMatchPct: parsed.primaryMatchPct||0,
@@ -749,7 +767,7 @@ export default function App() {
     return true;
   });
 
-  const LABEL = { dashboard:"Overview", upload:"Upload Resume", pipeline:"Pipeline", interviews:"Interviews", report:"Activity Report", candidates:"My Candidates", jobs:"Job Postings" };
+  const LABEL = { dashboard:"Overview", upload:"Upload Resume", pipeline:"Pipeline", interviews:"Interviews", report:"Activity Report", candidates:"My Candidates", jobs:"Job Postings", aiscreened:"AI Screened Resumes" };
 
   return (
     <div style={{display:"flex",height:"100vh",background:C.bg,fontFamily:FM,color:C.cream,overflow:"hidden"}}>
@@ -765,7 +783,8 @@ export default function App() {
           <div style={{fontSize:8,color:C.muted,padding:"0 8px 5px",letterSpacing:"0.14em"}}>MY WORKSPACE</div>
           <NavItem id="dashboard"   label="Dashboard"     icon="◈" />
           <NavItem id="candidates"  label="My Candidates" icon="○" badge={myCandsPending} />
-          <NavItem id="upload"      label="Upload Resume"  icon="⬆" badge={aiScanned||null} />
+          <NavItem id="upload"      label="Upload Resume"  icon="⬆" />
+          <NavItem id="aiscreened"  label="AI Screened"    icon="🤖" badge={aiScanned||null} />
           <NavItem id="jobs"        label="Job Postings"   icon="◇" badge={jobs.filter(j=>j.status==="Active").length||null} />
           <NavItem id="pipeline"    label="Full Pipeline"  icon="⬡" />
           <NavItem id="interviews"  label="Interviews"     icon="◻" badge={pendingInterviews||null} />
@@ -1740,6 +1759,243 @@ export default function App() {
                   })}
                 </div>
               ))}
+            </div>
+          )}
+
+
+          {/* ══ AI SCREENED RESUMES ══ */}
+          {tab==="aiscreened" && (
+            <div className="fi">
+              {/* Summary bar */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:18}}>
+                {[
+                  {label:"AI Screened",  value:candidates.filter(c=>c.source==="ai").length,                                           color:C.purple},
+                  {label:"Shortlisted",  value:candidates.filter(c=>c.source==="ai"&&c.recommendation==="shortlist").length,            color:C.green},
+                  {label:"Consider",     value:candidates.filter(c=>c.source==="ai"&&c.recommendation==="consider").length,             color:C.orange},
+                  {label:"Rejected",     value:candidates.filter(c=>c.source==="ai"&&c.recommendation==="reject").length,               color:C.red},
+                ].map(m=>(
+                  <div key={m.label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",borderTop:`2px solid ${m.color}`}}>
+                    <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>{m.label.toUpperCase()}</div>
+                    <div style={{fontFamily:FD,fontSize:30,color:m.color,lineHeight:1}}>{m.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {candidates.filter(c=>c.source==="ai").length===0 ? (
+                <div style={{background:C.card,border:`1px dashed ${C.border}`,borderRadius:8,padding:"40px 32px",textAlign:"center"}}>
+                  <div style={{fontSize:32,opacity:0.15,marginBottom:10}}>🤖</div>
+                  <div style={{fontSize:13,color:C.muted,marginBottom:4}}>No AI screened resumes yet</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:16}}>Upload resumes to screen them with AI</div>
+                  <button onClick={()=>setTab("upload")} style={{padding:"8px 18px",borderRadius:4,background:C.amber,border:"none",color:C.bg,fontFamily:FM,fontSize:10,cursor:"pointer",fontWeight:700}}>⬆ UPLOAD RESUMES →</button>
+                </div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {candidates.filter(c=>c.source==="ai").map(c=>{
+                    const job = jobs.find(j=>j.id===c.jobId);
+                    const rec = RECRUITERS.find(r=>r.id===c.recruiterId);
+                    const sm  = STATUS_META[c.interviewStatus]||STATUS_META.pending;
+                    const recColor = rec?.color || C.muted;
+                    const recInitials = rec?.initials || ini(c.recruiterId||"?");
+                    const recObj = recruiters.find(r=>r.id===c.recruiterId);
+                    const rColor = recObj?.color||C.muted;
+
+                    return (
+                      <div key={c.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+                        {/* Top header bar */}
+                        <div style={{background:C.faint,padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${C.border}`}}>
+                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                            <Avatar text={c.avatar||ini(c.name)} size={36} color={sc(c.score)}/>
+                            <div>
+                              <div style={{fontFamily:FD,fontSize:17,color:C.cream}}>{c.name}</div>
+                              <div style={{fontSize:10,color:C.muted}}>{c.role}{c.currentCompany?` @ ${c.currentCompany}`:""} · {c.exp}</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                            {c.recommendation && (
+                              <Badge label={c.recommendation.toUpperCase()} color={c.recommendation==="shortlist"?C.green:c.recommendation==="reject"?C.red:C.orange}/>
+                            )}
+                            <Badge label={`${c.score}% FIT`} color={sc(c.score)}/>
+                            <Badge label={sm.label} color={sm.color}/>
+                            <Badge label={job?.title||"—"} color={C.muted}/>
+                          </div>
+                        </div>
+
+                        <div style={{padding:"14px 16px"}}>
+                          {/* Contact info row */}
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14,padding:"10px 14px",background:C.surface,borderRadius:8,border:`1px solid ${C.border}`}}>
+                            <div>
+                              <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>EMAIL</div>
+                              <div style={{fontSize:11,color:c.email?C.teal:C.muted}}>{c.email||"Not found"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>PHONE</div>
+                              <div style={{fontSize:11,color:c.phone?C.teal:C.muted}}>{c.phone||"Not found"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>LOCATION</div>
+                              <div style={{fontSize:11,color:c.location?C.cream:C.muted}}>{c.location||"Not found"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:4}}>SCREENED BY</div>
+                              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                <Avatar text={recObj?.initials||"?"} size={18} color={rColor}/>
+                                <span style={{fontSize:11,color:C.cream}}>{recObj?.name||"—"}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Education */}
+                          {c.education && c.education!=="—" && (
+                            <div style={{marginBottom:12}}>
+                              <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>EDUCATION</div>
+                              {c.educationDetail?.length>0 ? (
+                                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                                  {c.educationDetail.map((e,i)=>(
+                                    <div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:5,border:`1px solid ${C.border}`}}>
+                                      <span style={{fontSize:12,color:C.amber}}>🎓</span>
+                                      <div>
+                                        <span style={{fontSize:11,color:C.cream,fontWeight:500}}>{e.degree}</span>
+                                        {e.specialization && <span style={{fontSize:10,color:C.muted}}> · {e.specialization}</span>}
+                                        {e.institution && <span style={{fontSize:10,color:C.muted}}> — {e.institution}</span>}
+                                        {e.year && <span style={{fontSize:10,color:C.amber}}> ({e.year})</span>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{fontSize:11,color:C.muted,padding:"6px 10px",background:C.surface,borderRadius:5,border:`1px solid ${C.border}`}}>{c.education}</div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Certifications + Languages */}
+                          {(c.certifications?.length>0||c.languages?.length>0) && (
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                              {c.certifications?.length>0 && (
+                                <div>
+                                  <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>CERTIFICATIONS</div>
+                                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                    {c.certifications.map(cert=>(
+                                      <span key={cert} style={{padding:"3px 8px",borderRadius:4,fontSize:10,background:C.teal+"15",color:C.teal,fontFamily:FM,border:`0.5px solid ${C.teal}40`}}>{cert}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {c.languages?.length>0 && (
+                                <div>
+                                  <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>LANGUAGES</div>
+                                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                    {c.languages.map(lang=>(
+                                      <span key={lang} style={{padding:"3px 8px",borderRadius:4,fontSize:10,background:C.purple+"15",color:C.purple,fontFamily:FM,border:`0.5px solid ${C.purple}40`}}>{lang}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Skills */}
+                          <div style={{marginBottom:12}}>
+                            <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>SKILLS</div>
+                            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                              {(c.skills||[]).map(s=><Pill key={s} label={s}/>)}
+                            </div>
+                          </div>
+
+                          {/* Match % bars */}
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                            <div style={{padding:"8px 12px",background:sc(c.score)+"12",border:`1px solid ${sc(c.score)}30`,borderRadius:6,textAlign:"center"}}>
+                              <div style={{fontFamily:FD,fontSize:24,color:sc(c.score),lineHeight:1}}>{c.score}%</div>
+                              <div style={{fontSize:8,color:C.muted,marginTop:3}}>OVERALL FIT</div>
+                              <div style={{height:3,background:C.border,borderRadius:2,marginTop:5,overflow:"hidden"}}>
+                                <div style={{width:`${c.score}%`,height:"100%",background:sc(c.score),borderRadius:2}}/>
+                              </div>
+                            </div>
+                            <div style={{padding:"8px 12px",background:sc(c.primaryMatchPct||0)+"12",border:`1px solid ${sc(c.primaryMatchPct||0)}30`,borderRadius:6,textAlign:"center"}}>
+                              <div style={{fontFamily:FD,fontSize:24,color:sc(c.primaryMatchPct||0),lineHeight:1}}>{c.primaryMatchPct||0}%</div>
+                              <div style={{fontSize:8,color:C.muted,marginTop:3}}>PRIMARY SKILLS</div>
+                              <div style={{fontSize:9,color:C.muted}}>{c.primarySkillsMatched||0}/{c.primarySkillsTotal||0} matched</div>
+                              <div style={{height:3,background:C.border,borderRadius:2,marginTop:3,overflow:"hidden"}}>
+                                <div style={{width:`${c.primaryMatchPct||0}%`,height:"100%",background:sc(c.primaryMatchPct||0),borderRadius:2}}/>
+                              </div>
+                            </div>
+                            <div style={{padding:"8px 12px",background:C.blue+"12",border:`1px solid ${C.blue}30`,borderRadius:6,textAlign:"center"}}>
+                              <div style={{fontFamily:FD,fontSize:24,color:C.blue,lineHeight:1}}>{c.secondaryMatchPct||0}%</div>
+                              <div style={{fontSize:8,color:C.muted,marginTop:3}}>SECONDARY SKILLS</div>
+                              <div style={{fontSize:9,color:C.muted}}>{c.experienceMatch||"—"} exp</div>
+                              <div style={{height:3,background:C.border,borderRadius:2,marginTop:3,overflow:"hidden"}}>
+                                <div style={{width:`${c.secondaryMatchPct||0}%`,height:"100%",background:C.blue,borderRadius:2}}/>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Skill breakdown */}
+                          {c.skillMatch?.length>0 && (
+                            <div style={{marginBottom:12}}>
+                              <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:6}}>SKILL MATCH BREAKDOWN</div>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                                {c.skillMatch.map((sm,i)=>{
+                                  const col=sm.relevance==="exact"?C.green:sm.relevance==="partial"?C.orange:C.red;
+                                  const icon=sm.relevance==="exact"?"✓":sm.relevance==="partial"?"~":"✗";
+                                  return (
+                                    <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",background:col+"08",border:`1px solid ${col}25`,borderRadius:4}}>
+                                      <span style={{fontSize:11,color:col,width:14,flexShrink:0}}>{icon}</span>
+                                      <div style={{flex:1,minWidth:0}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                          <span style={{fontSize:10,color:C.cream}}>{sm.skill}</span>
+                                          {sm.required&&<span style={{fontSize:7,padding:"1px 4px",borderRadius:2,background:C.amber+"20",color:C.amber,fontFamily:FM}}>PRIMARY</span>}
+                                        </div>
+                                        {sm.note&&<div style={{fontSize:9,color:C.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sm.note}</div>}
+                                      </div>
+                                      <span style={{fontSize:8,color:col,fontFamily:FM,textTransform:"uppercase",flexShrink:0}}>{sm.relevance}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Strengths + Red flags */}
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                            {c.strengths?.length>0&&(
+                              <div style={{padding:"8px 10px",background:C.green+"10",border:`1px solid ${C.green}30`,borderRadius:6}}>
+                                <div style={{fontSize:8,color:C.green,letterSpacing:"0.1em",marginBottom:5}}>STRENGTHS</div>
+                                {c.strengths.map(s=><div key={s} style={{fontSize:10,color:C.cream,marginBottom:2}}>• {s}</div>)}
+                              </div>
+                            )}
+                            {c.redFlags?.length>0&&(
+                              <div style={{padding:"8px 10px",background:C.red+"10",border:`1px solid ${C.red}30`,borderRadius:6}}>
+                                <div style={{fontSize:8,color:C.red,letterSpacing:"0.1em",marginBottom:5}}>RED FLAGS</div>
+                                {c.redFlags.map(f=><div key={f} style={{fontSize:10,color:C.muted,marginBottom:2}}>• {f}</div>)}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Assessment + actions */}
+                          <div style={{padding:"7px 10px",background:C.faint,borderRadius:5,fontSize:10,color:C.muted,marginBottom:12}}>
+                            <span style={{color:C.amber}}>Assessment: </span>{c.fitReason}
+                          </div>
+
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                            <span style={{fontSize:9,color:C.muted}}>STATUS:</span>
+                            {["approved","rejected","hold","pending"].map(st=>(
+                              <button key={st} onClick={()=>updateStatus(c.id,st)}
+                                style={{padding:"4px 10px",borderRadius:4,border:`0.5px solid ${STATUS_META[st].color}${c.interviewStatus===st?"":"40"}`,background:c.interviewStatus===st?STATUS_META[st].color+"20":"transparent",color:STATUS_META[st].color,fontFamily:FM,fontSize:9,cursor:"pointer",fontWeight:c.interviewStatus===st?"700":"400"}}>
+                                {STATUS_META[st].label.toUpperCase()}
+                              </button>
+                            ))}
+                            <span style={{fontSize:9,color:C.muted,marginLeft:6}}>STAGE:</span>
+                            <select value={c.stage} onChange={e=>updateStage(c.id,e.target.value)}
+                              style={{background:C.faint,border:`0.5px solid ${C.border}`,borderRadius:4,color:C.cream,fontFamily:FM,fontSize:9,padding:"4px 8px",cursor:"pointer"}}>
+                              {STAGES.map(s=><option key={s}>{s}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
