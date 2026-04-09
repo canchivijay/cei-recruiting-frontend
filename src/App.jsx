@@ -42,6 +42,32 @@ const STOR_CANDS = "cei_candidates_v1";
 const STOR_INTV  = "cei_interviews_v1";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Contact Normalizer ─────────────────────────────────────────────────────
+function extractContact(parsed = {}) {
+  const email =
+    parsed.email ||
+    parsed.contact?.email ||
+    parsed.contactEmail ||
+    parsed.personalEmail ||
+    null;
+
+  const phone =
+    parsed.phone ||
+    parsed.mobile ||
+    parsed.contact?.phone ||
+    parsed.contact?.mobile ||
+    null;
+
+  const location =
+    parsed.location ||
+    parsed.currentLocation ||
+    parsed.contact?.location ||
+    null;
+
+  return { email, phone, location };
+}
+
+
 const sc = v => v >= 88 ? C.green : v >= 70 ? C.amber : C.red;
 const ini = n => n.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
 const fmt = iso => new Date(iso).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
