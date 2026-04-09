@@ -50,7 +50,7 @@ const Avatar = ({ text, size=36, color=C.amber }) => (
   <div style={{width:size,height:size,borderRadius:"50%",background:color+"20",border:`1px solid ${color}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.33,fontFamily:FM,color,flexShrink:0,fontWeight:600}}>{text}</div>
 );
 const Badge = ({ label, color }) => (
-  <span style={{padding:"2px 8px",borderRadius:4,fontSize:10,background:color+"20",color,border:`0.5px solid ${color}40`,fontFamily:FM,letterSpacing:"0.06em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{label}</span>
+  <span style={{padding:"3px 10px",borderRadius:4,fontSize:12,background:color+"20",color,border:`0.5px solid ${color}40`,fontFamily:FM,letterSpacing:"0.06em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{label}</span>
 );
 const Bar = ({ val }) => (
   <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -61,7 +61,7 @@ const Bar = ({ val }) => (
   </div>
 );
 const Pill = ({ label }) => (
-  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,background:C.faint,color:C.muted,fontFamily:FM,border:`0.5px solid ${C.border}`}}>{label}</span>
+  <span style={{padding:"3px 10px",borderRadius:20,fontSize:12,background:C.faint,color:C.muted,fontFamily:FM,border:`0.5px solid ${C.border}`}}>{label}</span>
 );
 const Spin = () => (
   <div style={{display:"inline-block",width:14,height:14,border:`2px solid ${C.amberDim}`,borderTop:`2px solid ${C.amber}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
@@ -113,10 +113,12 @@ INSTRUCTIONS:
 - Do not process resumes in languages other than English
 - Respond only to resume evaluation and skill matching
 - Always communicate in English
+- CRITICAL: You MUST extract the candidate name from the top of the resume. Look for it in the header, title, or first line. Never return "Unknown" for name.
+- CRITICAL: Extract email (look for @ symbol), phone (look for digits with spaces/dashes), location (look for city/state near top)
 
 Return ONLY this JSON object, nothing else, no markdown, no backticks:
 {
-  "name": "candidate full legal name",
+  "name": "EXTRACT the candidate full name exactly as written at top of resume - this is CRITICAL",
   "email": "email address extracted from resume or null",
   "phone": "phone/mobile number with country code if present or null",
   "location": "city, state/country extracted from resume or null",
@@ -256,6 +258,21 @@ export default function App() {
 
   // Inline confirmation for clearing resumes
   const [confirmClearJobId, setConfirmClearJobId] = useState(null);
+
+  // Job editing state
+  const [editingJobId, setEditingJobId]   = useState(null);
+  const [ejTitle, setEjTitle]             = useState("");
+  const [ejDept, setEjDept]               = useState(DEPTS[0]);
+  const [ejLocation, setEjLocation]       = useState(LOCATIONS[0]);
+  const [ejSkillInput, setEjSkillInput]   = useState("");
+  const [ejSkills, setEjSkills]           = useState([]);
+  const [ejSecInput, setEjSecInput]       = useState("");
+  const [ejSecSkills, setEjSecSkills]     = useState([]);
+  const [ejResponsibilities, setEjResponsibilities] = useState("");
+  const [ejUrgent, setEjUrgent]           = useState(false);
+
+  // Candidate expanded detail view
+  const [expandedCandId, setExpandedCandId] = useState(null);
 
   // Job creation state
   const [showJobForm, setShowJobForm]     = useState(false);
@@ -538,6 +555,30 @@ export default function App() {
     setJobs(p => p.filter(j => j.id !== id));
   };
 
+  const startEditJob = (job) => {
+    setEditingJobId(job.id);
+    setEjTitle(job.title);
+    setEjDept(job.dept);
+    setEjLocation(job.location);
+    setEjSkills(job.skills||[]);
+    setEjSecSkills(job.secondarySkills||[]);
+    setEjResponsibilities(job.responsibilities||"");
+    setEjUrgent(job.urgent||false);
+    setEjSkillInput(""); setEjSecInput("");
+  };
+
+  const saveEditJob = (id) => {
+    setJobs(p => p.map(j => j.id!==id ? j : {
+      ...j,
+      title: ejTitle.trim()||j.title,
+      dept: ejDept, location: ejLocation,
+      skills: ejSkills, secondarySkills: ejSecSkills,
+      responsibilities: ejResponsibilities.trim(),
+      urgent: ejUrgent,
+    }));
+    setEditingJobId(null);
+  };
+
   const clearJobCandidates = (jobId) => {
     setConfirmClearJobId(jobId);
   };
@@ -770,7 +811,7 @@ export default function App() {
   const LABEL = { dashboard:"Overview", upload:"Upload Resume", pipeline:"Pipeline", interviews:"Interviews", report:"Activity Report", candidates:"My Candidates", jobs:"Job Postings", aiscreened:"AI Screened Resumes" };
 
   return (
-    <div style={{display:"flex",height:"100vh",background:C.bg,fontFamily:FM,color:C.cream,overflow:"hidden"}}>
+    <div style={{display:"flex",height:"100vh",background:C.bg,fontFamily:FM,color:C.cream,overflow:"hidden",fontSize:14}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}} .fi{animation:fadeIn 0.25s ease} input::placeholder{color:${C.muted}} ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}`}</style>
 
       {/* Sidebar */}
@@ -889,16 +930,18 @@ export default function App() {
                   <div style={{marginBottom:8,fontSize:9,color:C.muted,letterSpacing:"0.12em"}}>YOUR STATS — {currentRecruiter.name.toUpperCase()}</div>
                   <div style={{display:"flex",flexDirection:"column",gap:6}}>
                     {[
-                      {label:"My Candidates", value:myCandidates.length,                                          color:currentRecruiter.color},
-                      {label:"Approved",       value:myCandidates.filter(c=>c.interviewStatus==="approved").length, color:C.green},
-                      {label:"Rejected",       value:myCandidates.filter(c=>c.interviewStatus==="rejected").length, color:C.red},
-                      {label:"On Hold",        value:myCandidates.filter(c=>c.interviewStatus==="hold").length,     color:C.orange},
-                      {label:"Offered",        value:myCandidates.filter(c=>c.stage==="Offer").length,              color:C.teal},
-                      {label:"Hired",          value:myCandidates.filter(c=>c.stage==="Hired").length,              color:C.green},
+                      {label:"My Candidates", value:myCandidates.length,                                                                                              color:currentRecruiter.color},
+                      {label:"Approved",       value:myCandidates.filter(c=>c.interviewStatus==="approved").length,                                                    color:C.green},
+                      {label:"Rejected",       value:myCandidates.filter(c=>c.interviewStatus==="rejected").length,                                                    color:C.red},
+                      {label:"On Hold",        value:myCandidates.filter(c=>c.interviewStatus==="hold").length,                                                        color:C.orange},
+                      {label:"Level 1 Rounds", value:interviews.filter(i=>i.recruiterId===currentRecruiter.id&&i.level==="l1").length,                                 color:C.blue},
+                      {label:"Level 2 Rounds", value:interviews.filter(i=>i.recruiterId===currentRecruiter.id&&i.level==="l2").length,                                 color:C.purple},
+                      {label:"Offer Stage",    value:myCandidates.filter(c=>c.stage==="Offer").length,                                                                 color:C.teal},
+                      {label:"Hired",          value:myCandidates.filter(c=>c.stage==="Hired").length,                                                                 color:C.green},
                     ].map(m=>(
                       <div key={m.label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{fontSize:10,color:C.muted}}>{m.label}</span>
-                        <span style={{fontFamily:FD,fontSize:20,color:m.color,lineHeight:1}}>{m.value}</span>
+                        <span style={{fontSize:13,color:C.muted}}>{m.label}</span>
+                        <span style={{fontFamily:FD,fontSize:22,color:m.color,lineHeight:1}}>{m.value}</span>
                       </div>
                     ))}
                   </div>
@@ -944,38 +987,125 @@ export default function App() {
                 {myCandidates.map(c=>{
                   const job = jobs.find(j=>j.id===c.jobId);
                   const sm = STATUS_META[c.interviewStatus];
-                  const isEditing = editingCand === c.id;
-                  const iStyle = {background:C.surface,border:`1px solid ${C.border}`,borderRadius:5,padding:"6px 10px",color:C.cream,fontFamily:FM,fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
+                  const isEditing  = editingCand === c.id;
+                  const isExpanded = expandedCandId === c.id;
+                  const iStyle     = {background:C.surface,border:`1px solid ${C.border}`,borderRadius:5,padding:"8px 12px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
                   return (
-                    <div key={c.id} style={{background:C.card,border:`1px solid ${isEditing?C.amber+"80":C.border}`,borderRadius:8,padding:"12px 16px",transition:"border-color 0.15s"}}>
-                      {!isEditing ? (
-                        <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-                          <Avatar text={c.avatar} size={38} color={sc(c.score)}/>
+                    <div key={c.id} style={{background:C.card,border:`1px solid ${isEditing?C.amber+"80":isExpanded?C.blue+"60":C.border}`,borderRadius:8,overflow:"hidden"}}>
+                      {/* Clickable summary row */}
+                      {!isEditing && (
+                        <div onClick={()=>setExpandedCandId(isExpanded?null:c.id)}
+                          style={{padding:"12px 16px",cursor:"pointer",display:"flex",gap:12,alignItems:"center"}}>
+                          <Avatar text={c.avatar||ini(c.name||"?")} size={40} color={sc(c.score)}/>
                           <div style={{flex:1}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-                              <div>
-                                <div style={{fontSize:14,color:C.cream}}>{c.name}</div>
-                                <div style={{fontSize:10,color:C.muted}}>{c.role} · {c.exp} · {job?.title}</div>
+                            <div style={{fontSize:16,color:C.cream,fontWeight:500}}>{c.name}</div>
+                            <div style={{fontSize:13,color:C.muted,marginTop:2}}>{c.role}{c.currentCompany?` @ ${c.currentCompany}`:""} · {c.exp} · {job?.title||"—"}</div>
+                          </div>
+                          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                            <Badge label={c.stage} color={STAGE_META[c.stage]?.color||C.muted}/>
+                            <Badge label={sm?.label||"Pending"} color={sm?.color||C.muted}/>
+                            {c.source==="ai" && <Badge label="AI" color={C.purple}/>}
+                            <span style={{fontSize:18,color:C.muted,marginLeft:4}}>{isExpanded?"▲":"▼"}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Expanded full profile */}
+                      {!isEditing && isExpanded && (
+                        <div style={{borderTop:`1px solid ${C.border}`,padding:"16px 16px",background:C.surface}}>
+                          {/* Score bar */}
+                          <div style={{marginBottom:14}}><Bar val={c.score}/></div>
+                          {/* Full contact grid */}
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14,padding:"14px",background:C.card,borderRadius:8,border:`1px solid ${C.border}`}}>
+                            {[{l:"FULL NAME",v:c.name,col:C.cream},{l:"EMAIL ID",v:c.email||"Not found",col:c.email?C.teal:C.muted},{l:"PHONE NUMBER",v:c.phone||"Not found",col:c.phone?C.teal:C.muted},{l:"LOCATION",v:c.location||"Not found",col:c.location?C.cream:C.muted}].map(({l,v,col})=>(
+                              <div key={l}>
+                                <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>{l}</div>
+                                <div style={{fontSize:14,color:col,fontWeight:500}}>{v}</div>
                               </div>
-                              <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end",alignItems:"center"}}>
-                                <Badge label={c.stage} color={STAGE_META[c.stage]?.color||C.muted}/>
-                                <Badge label={sm?.label} color={sm?.color}/>
-                                {c.source==="ai" && <Badge label="AI" color={C.purple}/>}
-                                <button onClick={()=>startEditCand(c)} style={{padding:"3px 10px",borderRadius:4,border:`0.5px solid ${C.amber}60`,background:C.amber+"12",color:C.amber,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>EDIT</button>
-                              </div>
+                            ))}
+                            {c.education&&<div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EDUCATION</div><div style={{fontSize:13,color:C.cream}}>{c.education}</div></div>}
+                            {c.certifications?.length>0&&<div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.muted,marginBottom:5}}>CERTIFICATIONS</div><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{c.certifications.map(x=><span key={x} style={{padding:"3px 9px",borderRadius:4,fontSize:12,background:C.teal+"15",color:C.teal,fontFamily:FM}}>{x}</span>)}</div></div>}
+                          </div>
+                          {/* Match scores */}
+                          {c.primaryMatchPct>0&&(
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                              {[{l:"OVERALL FIT",v:c.score,col:sc(c.score)},{l:"PRIMARY SKILLS",v:c.primaryMatchPct||0,col:sc(c.primaryMatchPct||0),sub:`${c.primarySkillsMatched||0}/${c.primarySkillsTotal||0} matched`},{l:"SECONDARY SKILLS",v:c.secondaryMatchPct||0,col:C.blue,sub:c.experienceMatch}].map(m=>(
+                                <div key={m.l} style={{padding:"10px",background:m.col+"12",border:`1px solid ${m.col}30`,borderRadius:6,textAlign:"center"}}>
+                                  <div style={{fontFamily:FD,fontSize:28,color:m.col,lineHeight:1}}>{m.v}%</div>
+                                  <div style={{fontSize:11,color:C.muted,marginTop:3}}>{m.l}</div>
+                                  {m.sub&&<div style={{fontSize:11,color:C.muted}}>{m.sub}</div>}
+                                </div>
+                              ))}
                             </div>
-                            {/* Contact details */}
-                            {(c.email||c.phone||c.location) && (
-                              <div style={{display:"flex",gap:14,marginBottom:8,flexWrap:"wrap"}}>
-                                {c.email && <span style={{fontSize:10,color:C.teal}}>✉ {c.email}</span>}
-                                {c.phone && <span style={{fontSize:10,color:C.teal}}>✆ {c.phone}</span>}
-                                {c.location && <span style={{fontSize:10,color:C.muted}}>◻ {c.location}</span>}
-                              </div>
-                            )}
-                            <div style={{marginBottom:8}}><Bar val={c.score}/></div>
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-                              {(c.skills||[]).map(s=><Pill key={s} label={s}/>)}
+                          )}
+                          {/* Skills */}
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>{(c.skills||[]).map(s=><Pill key={s} label={s}/>)}</div>
+                          {c.summary&&<div style={{fontSize:13,color:C.muted,lineHeight:1.6,marginBottom:12}}>{c.summary}</div>}
+                          {(c.strengths?.length>0||c.redFlags?.length>0)&&(
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                              {c.strengths?.length>0&&<div style={{padding:"8px 10px",background:C.green+"10",border:`1px solid ${C.green}30`,borderRadius:6}}><div style={{fontSize:11,color:C.green,marginBottom:4}}>STRENGTHS</div>{c.strengths.map(s=><div key={s} style={{fontSize:13,color:C.cream,marginBottom:2}}>• {s}</div>)}</div>}
+                              {c.redFlags?.length>0&&<div style={{padding:"8px 10px",background:C.red+"10",border:`1px solid ${C.red}30`,borderRadius:6}}><div style={{fontSize:11,color:C.red,marginBottom:4}}>RED FLAGS</div>{c.redFlags.map(f=><div key={f} style={{fontSize:13,color:C.muted,marginBottom:2}}>• {f}</div>)}</div>}
                             </div>
+                          )}
+                          {/* Interview Rounds */}
+                          <div style={{marginBottom:12}}>
+                            <div style={{fontSize:12,color:C.muted,letterSpacing:"0.08em",marginBottom:8,display:"flex",justifyContent:"space-between"}}>
+                              <span>INTERVIEW ROUNDS</span>
+                              <span style={{color:C.amber}}>{interviews.filter(i=>i.candidateId===c.id).length} SCHEDULED</span>
+                            </div>
+                            <div style={{display:"flex",gap:8}}>
+                              {INTERVIEW_LEVELS.map(lvl=>{
+                                const round=interviews.find(i=>i.candidateId===c.id&&i.level===lvl.id);
+                                const rs=round?INTERVIEW_STATUS_META[round.status]:null;
+                                return (
+                                  <div key={lvl.id} style={{flex:1,background:round?lvl.color+"12":C.faint,border:`1px solid ${round?lvl.color+"50":C.border}`,borderRadius:6,padding:"10px",textAlign:"center"}}>
+                                    <div style={{fontSize:12,color:lvl.color,fontWeight:700,marginBottom:4}}>{lvl.label}</div>
+                                    {round?(<>
+                                      <div style={{fontSize:12,color:C.muted,marginBottom:4}}>{round.date} · {round.time}</div>
+                                      <select value={round.status} onChange={e=>updateInterview(round.id,{status:e.target.value})}
+                                        style={{width:"100%",background:rs?.color+"15",border:`1px solid ${rs?.color}50`,borderRadius:4,color:rs?.color,fontFamily:FM,fontSize:12,padding:"3px 6px",cursor:"pointer",outline:"none",fontWeight:700}}>
+                                        {["scheduled","completed","approved","cancelled"].map(s=><option key={s} value={s}>{INTERVIEW_STATUS_META[s].label}</option>)}
+                                      </select>
+                                    </>):(<div style={{fontSize:12,color:C.muted,opacity:0.5}}>Not scheduled</div>)}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          {/* Status + Stage + Edit */}
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+                            <span style={{fontSize:13,color:C.muted}}>STATUS:</span>
+                            {["approved","rejected","hold","pending"].map(st=>(
+                              <button key={st} onClick={()=>updateStatus(c.id,st)}
+                                style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${STATUS_META[st].color}${c.interviewStatus===st?"":"40"}`,background:c.interviewStatus===st?STATUS_META[st].color+"20":"transparent",color:STATUS_META[st].color,fontFamily:FM,fontSize:12,cursor:"pointer",fontWeight:c.interviewStatus===st?"700":"400"}}>
+                                {STATUS_META[st].label.toUpperCase()}
+                              </button>
+                            ))}
+                            <span style={{fontSize:13,color:C.muted,marginLeft:6}}>STAGE:</span>
+                            <select value={c.stage} onChange={e=>updateStage(c.id,e.target.value)} style={{background:C.faint,border:`0.5px solid ${C.border}`,borderRadius:4,color:C.cream,fontFamily:FM,fontSize:13,padding:"5px 10px",cursor:"pointer"}}>
+                              {STAGES.map(s=><option key={s}>{s}</option>)}
+                            </select>
+                            <button onClick={()=>{setEditingCand(c.id);setExpandedCandId(null);setEditForm({name:c.name,role:c.role||"",exp:c.exp||"",email:c.email||"",phone:c.phone||"",location:c.location||"",interviewStatus:c.interviewStatus||"pending",stage:c.stage||"Applied",skills:(c.skills||[]).join(", ")});}}
+                              style={{marginLeft:"auto",padding:"5px 14px",borderRadius:4,border:`0.5px solid ${C.amber}60`,background:C.amber+"12",color:C.amber,fontFamily:FM,fontSize:12,cursor:"pointer"}}>✏ EDIT</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Editing form placeholder - starts below */}
+                      {!isEditing && !isExpanded && (
+                        <div style={{padding:"0 16px 10px 16px"}}>
+                          <div style={{marginBottom:6}}><Bar val={c.score}/></div>
+                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{(c.skills||[]).slice(0,4).map(s=><Pill key={s} label={s}/>)}</div>
+                        </div>
+                      )}
+
+                      {/* Full fake section for edit form compat */}
+                      {!isEditing && false && (
+                        <div style={{flex:1}}>
+                          <div style={{marginBottom:8}}><Bar val={c.score}/></div>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                            {(c.skills||[]).map(s=><Pill key={s} label={s}/>)}
+                          </div>
 
                             {/* ── Interview Rounds ── */}
                             {(() => {
@@ -1534,38 +1664,71 @@ export default function App() {
                         <div className="fi" style={{marginTop:14,borderTop:`1px solid ${C.border}`,paddingTop:12}}>
                           <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:10}}>CANDIDATES FOR THIS ROLE</div>
                           {jobCands.length===0?(
-                            <div style={{fontSize:11,color:C.muted,padding:"8px 0"}}>No candidates screened yet.</div>
+                            <div style={{fontSize:13,color:C.muted,padding:"8px 0"}}>No candidates screened yet.</div>
                           ):(
-                            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                              {jobCands.map(c=>{
-                                const sm=STATUS_META[c.interviewStatus];
-                                const rec=recruiters.find(r=>r.id===c.recruiterId);
-                                const stageMeta=STAGE_META[c.stage];
+                            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                              {jobCands.map(jc=>{
+                                const sm      = STATUS_META[jc.interviewStatus]||STATUS_META.pending;
+                                const rec     = recruiters.find(r=>r.id===jc.recruiterId);
+                                const stageMeta=STAGE_META[jc.stage]||{color:C.muted};
+                                const candIntv = interviews.filter(i=>i.candidateId===jc.id);
                                 return (
-                                  <div key={c.id} style={{display:"grid",gridTemplateColumns:"1.4fr 0.8fr 0.5fr repeat(3,0.7fr) 0.8fr",gap:8,padding:"8px 12px",background:C.surface,borderRadius:6,border:`1px solid ${C.border}`,alignItems:"center"}}>
-                                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                                      <Avatar text={c.avatar} size={24} color={sc(c.score)}/>
-                                      <div>
-                                        <div style={{fontSize:11,color:C.cream}}>{c.name}</div>
-                                        <div style={{fontSize:9,color:C.muted}}>{c.exp}{c.email&&<span> · {c.email}</span>}</div>
+                                  <div key={jc.id} style={{background:C.card,borderRadius:8,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+                                    {/* Candidate header */}
+                                    <div style={{padding:"10px 14px",display:"flex",gap:10,alignItems:"center",borderBottom:`1px solid ${C.border}`}}>
+                                      <Avatar text={jc.avatar||ini(jc.name||"?")} size={32} color={sc(jc.score)}/>
+                                      <div style={{flex:1}}>
+                                        <div style={{fontSize:15,color:C.cream,fontWeight:500}}>{jc.name}</div>
+                                        <div style={{fontSize:12,color:C.muted}}>{jc.exp} {jc.email&&`· ${jc.email}`} {jc.phone&&`· ${jc.phone}`}</div>
+                                      </div>
+                                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                        <span style={{fontFamily:FD,fontSize:20,color:sc(jc.score)}}>{jc.score}%</span>
+                                        <Badge label={stageMeta.color?jc.stage:"Applied"} color={stageMeta.color||C.muted}/>
+                                        <Badge label={sm.label} color={sm.color}/>
+                                        {jc.recommendation&&<Badge label={jc.recommendation} color={jc.recommendation==="shortlist"?C.green:jc.recommendation==="reject"?C.red:C.orange}/>}
                                       </div>
                                     </div>
-                                    <span style={{fontSize:9,color:stageMeta?.color||C.muted,fontFamily:FM}}>{c.stage}</span>
-                                    <span style={{fontSize:12,color:sc(c.score),fontFamily:FD}}>{c.score}</span>
-                                    {INTERVIEW_LEVELS.map(lvl=>{
-                                      const round=interviews.find(i=>i.candidateId===c.id&&i.level===lvl.id);
-                                      const rst=round?INTERVIEW_STATUS_META[round.status]:null;
-                                      return (
-                                        <div key={lvl.id}>
-                                          {round?(
-                                            <span style={{padding:"2px 6px",borderRadius:3,fontSize:8,background:rst?.color+"18",color:rst?.color,fontFamily:FM,border:`0.5px solid ${rst?.color}40`,letterSpacing:"0.04em",whiteSpace:"nowrap"}}>{lvl.short}: {rst?.label}</span>
-                                          ):(
-                                            <span style={{fontSize:9,color:C.faint}}>{lvl.short}: —</span>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                    <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,background:sm?.color+"20",color:sm?.color,fontFamily:FM,border:`0.5px solid ${sm?.color}40`}}>{sm?.label}</span>
+                                    {/* Interview workflow */}
+                                    <div style={{padding:"10px 14px"}}>
+                                      <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:8}}>INTERVIEW WORKFLOW</div>
+                                      <div style={{display:"flex",gap:8,marginBottom:10}}>
+                                        {INTERVIEW_LEVELS.map(lvl=>{
+                                          const round=candIntv.find(i=>i.level===lvl.id);
+                                          const rs=round?INTERVIEW_STATUS_META[round.status]:null;
+                                          return (
+                                            <div key={lvl.id} style={{flex:1,background:round?lvl.color+"12":C.faint,border:`1px solid ${round?lvl.color+"50":C.border}`,borderRadius:6,padding:"8px 10px",textAlign:"center"}}>
+                                              <div style={{fontSize:12,color:lvl.color,fontWeight:700,marginBottom:3}}>{lvl.label}</div>
+                                              {round?(
+                                                <>
+                                                  <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{round.date} · {round.time}</div>
+                                                  <select value={round.status} onChange={e=>updateInterview(round.id,{status:e.target.value})}
+                                                    style={{width:"100%",background:rs?.color+"15",border:`1px solid ${rs?.color}50`,borderRadius:4,color:rs?.color,fontFamily:FM,fontSize:11,padding:"2px 5px",cursor:"pointer",outline:"none",fontWeight:700}}>
+                                                    {["scheduled","completed","approved","cancelled"].map(s=><option key={s} value={s}>{INTERVIEW_STATUS_META[s].label}</option>)}
+                                                  </select>
+                                                </>
+                                              ):(
+                                                <div style={{fontSize:11,color:C.muted,opacity:0.5}}>Not scheduled</div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      {/* Status + Stage controls */}
+                                      <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                                        <span style={{fontSize:12,color:C.muted}}>STATUS:</span>
+                                        {["approved","rejected","hold","pending"].map(st=>(
+                                          <button key={st} onClick={()=>updateStatus(jc.id,st)}
+                                            style={{padding:"3px 9px",borderRadius:4,border:`0.5px solid ${STATUS_META[st].color}${jc.interviewStatus===st?"":"40"}`,background:jc.interviewStatus===st?STATUS_META[st].color+"20":"transparent",color:STATUS_META[st].color,fontFamily:FM,fontSize:11,cursor:"pointer",fontWeight:jc.interviewStatus===st?"700":"400"}}>
+                                            {STATUS_META[st].label.toUpperCase()}
+                                          </button>
+                                        ))}
+                                        <span style={{fontSize:12,color:C.muted,marginLeft:4}}>STAGE:</span>
+                                        <select value={jc.stage} onChange={e=>updateStage(jc.id,e.target.value)}
+                                          style={{background:C.faint,border:`0.5px solid ${C.border}`,borderRadius:4,color:C.cream,fontFamily:FM,fontSize:12,padding:"3px 8px",cursor:"pointer"}}>
+                                          {STAGES.map(s=><option key={s}>{s}</option>)}
+                                        </select>
+                                      </div>
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -1576,19 +1739,75 @@ export default function App() {
 
                       {/* Actions */}
                       <div style={{display:"flex",gap:8,marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap",alignItems:"center"}}>
-                        <button onClick={()=>{setUploadJob(job.id);setTab("upload");}} style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${C.amber}60`,background:"transparent",color:C.amber,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>⬆ SCREEN RESUMES</button>
-                        <button onClick={()=>toggleJobStatus(job.id)} style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>{job.status==="Active"?"CLOSE ROLE":"REOPEN ROLE"}</button>
+                        <button onClick={()=>{setUploadJob(job.id);setTab("upload");}} style={{padding:"6px 13px",borderRadius:4,border:`0.5px solid ${C.amber}60`,background:"transparent",color:C.amber,fontFamily:FM,fontSize:11,cursor:"pointer",letterSpacing:"0.06em"}}>⬆ SCREEN RESUMES</button>
+                        <button onClick={()=>startEditJob(job)} style={{padding:"6px 13px",borderRadius:4,border:`0.5px solid ${C.blue}60`,background:C.blue+"10",color:C.blue,fontFamily:FM,fontSize:11,cursor:"pointer",letterSpacing:"0.06em"}}>✏ EDIT JOB</button>
+                        <button onClick={()=>toggleJobStatus(job.id)} style={{padding:"6px 13px",borderRadius:4,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:11,cursor:"pointer",letterSpacing:"0.06em"}}>{job.status==="Active"?"CLOSE ROLE":"REOPEN ROLE"}</button>
                         {confirmClearJobId===job.id ? (
                           <div style={{display:"flex",gap:6,alignItems:"center",padding:"4px 10px",background:C.red+"12",border:`1px solid ${C.red}40`,borderRadius:5}}>
-                            <span style={{fontSize:9,color:C.red,fontFamily:FM}}>Remove all {candidates.filter(c=>c.jobId===job.id).length} candidates?</span>
-                            <button onClick={()=>confirmClear(job.id)} style={{padding:"3px 10px",borderRadius:3,background:C.red,border:"none",color:"#fff",fontFamily:FM,fontSize:9,cursor:"pointer",fontWeight:700}}>YES</button>
-                            <button onClick={()=>setConfirmClearJobId(null)} style={{padding:"3px 10px",borderRadius:3,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:9,cursor:"pointer"}}>CANCEL</button>
+                            <span style={{fontSize:12,color:C.red,fontFamily:FM}}>Remove all {candidates.filter(cc=>cc.jobId===job.id).length} candidates?</span>
+                            <button onClick={()=>confirmClear(job.id)} style={{padding:"3px 10px",borderRadius:3,background:C.red,border:"none",color:"#fff",fontFamily:FM,fontSize:11,cursor:"pointer",fontWeight:700}}>YES</button>
+                            <button onClick={()=>setConfirmClearJobId(null)} style={{padding:"3px 10px",borderRadius:3,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:11,cursor:"pointer"}}>CANCEL</button>
                           </div>
                         ) : (
-                          <button onClick={()=>clearJobCandidates(job.id)} style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${C.orange}50`,background:"transparent",color:C.orange,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>✕ CLEAR RESUMES ({candidates.filter(c=>c.jobId===job.id).length})</button>
+                          <button onClick={()=>clearJobCandidates(job.id)} style={{padding:"6px 13px",borderRadius:4,border:`0.5px solid ${C.orange}50`,background:"transparent",color:C.orange,fontFamily:FM,fontSize:11,cursor:"pointer",letterSpacing:"0.06em"}}>✕ CLEAR RESUMES ({candidates.filter(cc=>cc.jobId===job.id).length})</button>
                         )}
-                        <button onClick={()=>handleDeleteJob(job.id)} style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${C.red}40`,background:"transparent",color:C.red,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>DELETE JOB</button>
+                        <button onClick={()=>handleDeleteJob(job.id)} style={{padding:"6px 13px",borderRadius:4,border:`0.5px solid ${C.red}40`,background:"transparent",color:C.red,fontFamily:FM,fontSize:11,cursor:"pointer",letterSpacing:"0.06em"}}>DELETE JOB</button>
                       </div>
+
+                      {/* ── Inline Edit Form ── */}
+                      {editingJobId===job.id && (
+                        <div className="fi" style={{marginTop:14,padding:16,background:C.surface,borderRadius:8,border:`1px solid ${C.blue}50`}}>
+                          <div style={{fontSize:12,color:C.blue,letterSpacing:"0.1em",marginBottom:14,fontWeight:700}}>EDITING: {job.title}</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                            <div style={{gridColumn:"1/-1"}}>
+                              <div style={{fontSize:12,color:C.muted,marginBottom:5}}>JOB TITLE</div>
+                              <input value={ejTitle} onChange={e=>setEjTitle(e.target.value)} style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+                            </div>
+                            <div>
+                              <div style={{fontSize:12,color:C.muted,marginBottom:5}}>DEPARTMENT</div>
+                              <select value={ejDept} onChange={e=>setEjDept(e.target.value)} style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none",cursor:"pointer"}}>
+                                {DEPTS.map(d=><option key={d}>{d}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <div style={{fontSize:12,color:C.muted,marginBottom:5}}>LOCATION</div>
+                              <select value={ejLocation} onChange={e=>setEjLocation(e.target.value)} style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none",cursor:"pointer"}}>
+                                {LOCATIONS.map(l=><option key={l}>{l}</option>)}
+                              </select>
+                            </div>
+                            <div style={{gridColumn:"1/-1"}}>
+                              <div style={{fontSize:12,color:C.muted,marginBottom:5}}>PRIMARY SKILLS <span style={{fontSize:11,opacity:0.6}}>(Enter to add)</span></div>
+                              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                                <input value={ejSkillInput} onChange={e=>setEjSkillInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();if(ejSkillInput.trim())setEjSkills(p=>[...p,ejSkillInput.trim()]);setEjSkillInput("");}}} placeholder="Add skill..." style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none"}}/>
+                                <button onClick={()=>{if(ejSkillInput.trim())setEjSkills(p=>[...p,ejSkillInput.trim()]);setEjSkillInput("");}} style={{padding:"7px 12px",borderRadius:6,background:C.amber+"22",border:`1px solid ${C.amber}40`,color:C.amber,fontFamily:FM,cursor:"pointer"}}>+</button>
+                              </div>
+                              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{ejSkills.map(s=><span key={s} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:20,background:C.amber+"18",border:`0.5px solid ${C.amber}40`,color:C.amber,fontFamily:FM,fontSize:12}}>{s}<button onClick={()=>setEjSkills(p=>p.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.amberDim,cursor:"pointer",padding:0,fontSize:13,lineHeight:1}}>×</button></span>)}</div>
+                            </div>
+                            <div style={{gridColumn:"1/-1"}}>
+                              <div style={{fontSize:12,color:C.muted,marginBottom:5}}>SECONDARY SKILLS</div>
+                              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                                <input value={ejSecInput} onChange={e=>setEjSecInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();if(ejSecInput.trim())setEjSecSkills(p=>[...p,ejSecInput.trim()]);setEjSecInput("");}}} placeholder="Add skill..." style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none"}}/>
+                                <button onClick={()=>{if(ejSecInput.trim())setEjSecSkills(p=>[...p,ejSecInput.trim()]);setEjSecInput("");}} style={{padding:"7px 12px",borderRadius:6,background:C.blue+"22",border:`1px solid ${C.blue}40`,color:C.blue,fontFamily:FM,cursor:"pointer"}}>+</button>
+                              </div>
+                              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{ejSecSkills.map(s=><span key={s} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:20,background:C.blue+"18",border:`0.5px solid ${C.blue}40`,color:C.blue,fontFamily:FM,fontSize:12}}>{s}<button onClick={()=>setEjSecSkills(p=>p.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",padding:0,fontSize:13,lineHeight:1}}>×</button></span>)}</div>
+                            </div>
+                            <div style={{gridColumn:"1/-1"}}>
+                              <div style={{fontSize:12,color:C.muted,marginBottom:5}}>RESPONSIBILITIES</div>
+                              <textarea value={ejResponsibilities} onChange={e=>setEjResponsibilities(e.target.value)} rows={3} style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none",resize:"vertical",lineHeight:1.6,boxSizing:"border-box"}}/>
+                            </div>
+                            <div style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:10}}>
+                              <button onClick={()=>setEjUrgent(v=>!v)} style={{width:36,height:20,borderRadius:10,background:ejUrgent?C.red+"40":C.faint,border:`1px solid ${ejUrgent?C.red:C.border}`,cursor:"pointer",position:"relative",flexShrink:0}}>
+                                <div style={{width:12,height:12,borderRadius:"50%",background:ejUrgent?C.red:C.muted,position:"absolute",top:3,left:ejUrgent?20:4,transition:"left 0.2s"}}/>
+                              </button>
+                              <span style={{fontSize:13,color:ejUrgent?C.red:C.muted}}>URGENT</span>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:8}}>
+                            <button onClick={()=>saveEditJob(job.id)} style={{padding:"8px 20px",borderRadius:4,background:C.amber,border:"none",color:"#fff",fontFamily:FM,fontSize:13,cursor:"pointer",fontWeight:700}}>SAVE CHANGES</button>
+                            <button onClick={()=>setEditingJobId(null)} style={{padding:"8px 14px",borderRadius:4,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:13,cursor:"pointer"}}>CANCEL</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     );
                   })}
