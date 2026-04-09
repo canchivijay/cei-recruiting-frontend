@@ -92,7 +92,53 @@ const GEMINI_KEY = "AIzaSyDh6Ll6t0JlN8tfQIeW8TkqrjO94wwpHMo";
 
 async function parseResume(base64, jobId, jobs) {
   const job = jobs.find(j=>j.id===jobId);
-  const prompt = `Parse this resume and return ONLY a JSON object: {"name":"string","email":"string|null","phone":"string|null","currentRole":"string","totalExp":"Xy","skills":["up to 6"],"education":"string","summary":"2 sentences","fitScore":<0-100 vs ${job?.title} needing ${(job?.skills||[]).join(",")}>,"fitReason":"1 sentence","strengths":["2-3 items"],"redFlags":["array or empty"]} ONLY JSON. No markdown. No backticks.`;
+  const primarySkills   = (job?.skills||[]).join(", ") || "not specified";
+  const secondarySkills = (job?.secondarySkills||[]).join(", ") || "none";
+
+  const prompt = `You are an expert HR resume screening assistant. Analyze this resume against the job requirements below.
+
+ROLE: ${job?.title || "Not specified"}
+DEPARTMENT: ${job?.dept || "Not specified"}
+PRIMARY SKILLS (must-have): ${primarySkills}
+SECONDARY SKILLS (good-to-have): ${secondarySkills}
+RESPONSIBILITIES: ${job?.responsibilities || "Not specified"}
+
+INSTRUCTIONS:
+- Analyze resumes in Word and PDF formats for hiring or HR professionals
+- Verify exact match between required skills in the job description and skills listed in the resume
+- Focus on primary skills as specified in the job description and the resume skills section
+- Rate each skill based on presence and relevance, and provide an overall fit assessment
+- Consider years of experience, education, and certifications
+- Present results in a clear, concise summary for easy decision-making
+- Do not process resumes in languages other than English
+- Respond only to resume evaluation and skill matching
+- Always communicate in English
+
+Return ONLY this JSON object, nothing else, no markdown, no backticks:
+{
+  "name": "candidate full name",
+  "email": "email or null",
+  "phone": "phone or null",
+  "currentRole": "most recent job title",
+  "totalExp": "X years Y months",
+  "skills": ["up to 8 skills found in resume"],
+  "education": "highest degree and institution",
+  "summary": "2 sentence professional summary",
+  "fitScore": <overall 0-100 fit score>,
+  "fitReason": "1 sentence overall fit explanation",
+  "skillMatch": [
+    {"skill": "skill name", "required": true, "found": true, "relevance": "exact|partial|missing", "note": "brief note"}
+  ],
+  "primarySkillsMatched": <number of primary skills found>,
+  "primarySkillsTotal": <total number of primary skills required>,
+  "primaryMatchPct": <0-100 percentage of primary skills matched>,
+  "secondaryMatchPct": <0-100 percentage of secondary skills matched>,
+  "experienceMatch": "exceeds|meets|below",
+  "strengths": ["2-3 key strengths relevant to the role"],
+  "redFlags": ["concerns or empty array"],
+  "recommendation": "shortlist|consider|reject"
+}`;
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
     {
@@ -313,6 +359,13 @@ export default function App() {
         education: parsed.education, summary: parsed.summary,
         fitReason: parsed.fitReason, redFlags: parsed.redFlags||[],
         strengths: parsed.strengths||[],
+        skillMatch: parsed.skillMatch||[],
+        primaryMatchPct: parsed.primaryMatchPct||0,
+        secondaryMatchPct: parsed.secondaryMatchPct||0,
+        primarySkillsMatched: parsed.primarySkillsMatched||0,
+        primarySkillsTotal: parsed.primarySkillsTotal||0,
+        experienceMatch: parsed.experienceMatch||"",
+        recommendation: parsed.recommendation||"consider",
         jobId: uploadJob,
         recruiterId: currentRecruiter?.id || "r1",
         source: "ai", stage: "Applied",
@@ -1177,19 +1230,87 @@ export default function App() {
               {/* Single upload result card */}
               {uploadResult && bulkQueue.length===0 && (
                 <div className="fi" style={{background:C.card,border:`1px solid ${C.green}50`,borderRadius:8,padding:16,marginBottom:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                  {/* Header row */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                     <div style={{fontSize:9,color:C.green,letterSpacing:"0.1em"}}>✓ ADDED TO PIPELINE · {currentRecruiter.name}</div>
-                    <Badge label={`${uploadResult.score}/100 FIT`} color={sc(uploadResult.score)}/>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      {uploadResult.recommendation && (
+                        <Badge label={uploadResult.recommendation.toUpperCase()} color={uploadResult.recommendation==="shortlist"?C.green:uploadResult.recommendation==="reject"?C.red:C.orange}/>
+                      )}
+                      <Badge label={`${uploadResult.score}/100 OVERALL FIT`} color={sc(uploadResult.score)}/>
+                    </div>
                   </div>
+
                   <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
                     <Avatar text={uploadResult.avatar} size={44} color={sc(uploadResult.score)}/>
                     <div style={{flex:1}}>
                       <div style={{fontFamily:FD,fontSize:18,color:C.cream,marginBottom:2}}>{uploadResult.name}</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{uploadResult.role} · {uploadResult.exp} · {jobs.find(j=>j.id===uploadJob)?.title}</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{uploadResult.role} · {uploadResult.exp} · {jobs.find(j=>j.id===uploadJob)?.title}</div>
+
+                      {/* Match percentage bars */}
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+                        {/* Overall fit */}
+                        <div style={{padding:"10px 12px",background:sc(uploadResult.score)+"12",border:`1px solid ${sc(uploadResult.score)}40`,borderRadius:8,textAlign:"center"}}>
+                          <div style={{fontFamily:FD,fontSize:32,color:sc(uploadResult.score),lineHeight:1}}>{uploadResult.score}%</div>
+                          <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginTop:4}}>OVERALL FIT</div>
+                          <div style={{height:3,background:C.border,borderRadius:2,marginTop:6,overflow:"hidden"}}>
+                            <div style={{width:`${uploadResult.score}%`,height:"100%",background:sc(uploadResult.score),borderRadius:2}}/>
+                          </div>
+                        </div>
+                        {/* Primary skills match */}
+                        <div style={{padding:"10px 12px",background:sc(uploadResult.primaryMatchPct||0)+"12",border:`1px solid ${sc(uploadResult.primaryMatchPct||0)}40`,borderRadius:8,textAlign:"center"}}>
+                          <div style={{fontFamily:FD,fontSize:32,color:sc(uploadResult.primaryMatchPct||0),lineHeight:1}}>{uploadResult.primaryMatchPct||0}%</div>
+                          <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginTop:4}}>PRIMARY SKILLS</div>
+                          <div style={{fontSize:9,color:C.muted,marginTop:2}}>{uploadResult.primarySkillsMatched||0}/{uploadResult.primarySkillsTotal||0} matched</div>
+                          <div style={{height:3,background:C.border,borderRadius:2,marginTop:4,overflow:"hidden"}}>
+                            <div style={{width:`${uploadResult.primaryMatchPct||0}%`,height:"100%",background:sc(uploadResult.primaryMatchPct||0),borderRadius:2}}/>
+                          </div>
+                        </div>
+                        {/* Secondary skills match */}
+                        <div style={{padding:"10px 12px",background:C.blue+"12",border:`1px solid ${C.blue}40`,borderRadius:8,textAlign:"center"}}>
+                          <div style={{fontFamily:FD,fontSize:32,color:C.blue,lineHeight:1}}>{uploadResult.secondaryMatchPct||0}%</div>
+                          <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em",marginTop:4}}>SECONDARY SKILLS</div>
+                          <div style={{fontSize:9,color:C.muted,marginTop:2}}>{uploadResult.experienceMatch||"—"} experience</div>
+                          <div style={{height:3,background:C.border,borderRadius:2,marginTop:4,overflow:"hidden"}}>
+                            <div style={{width:`${uploadResult.secondaryMatchPct||0}%`,height:"100%",background:C.blue,borderRadius:2}}/>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Skill-by-skill breakdown */}
+                      {uploadResult.skillMatch?.length>0 && (
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:8}}>SKILL MATCH BREAKDOWN</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                            {uploadResult.skillMatch.map((sm,i)=>{
+                              const rel = sm.relevance;
+                              const col = rel==="exact"?C.green:rel==="partial"?C.orange:C.red;
+                              const icon = rel==="exact"?"✓":rel==="partial"?"~":"✗";
+                              return (
+                                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:col+"08",border:`1px solid ${col}25`,borderRadius:5}}>
+                                  <span style={{fontSize:12,color:col,width:16,textAlign:"center",flexShrink:0}}>{icon}</span>
+                                  <div style={{flex:1}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                      <span style={{fontSize:11,color:C.cream,fontWeight:500}}>{sm.skill}</span>
+                                      {sm.required && <span style={{fontSize:8,padding:"1px 5px",borderRadius:3,background:C.amber+"20",color:C.amber,fontFamily:FM,letterSpacing:"0.06em"}}>PRIMARY</span>}
+                                    </div>
+                                    {sm.note && <div style={{fontSize:9,color:C.muted,marginTop:1}}>{sm.note}</div>}
+                                  </div>
+                                  <span style={{fontSize:9,color:col,fontFamily:FM,letterSpacing:"0.06em",textTransform:"uppercase",flexShrink:0}}>{rel}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Summary + skills found */}
                       <div style={{fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:10}}>{uploadResult.summary}</div>
                       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
-                        {uploadResult.skills.map(s=><Pill key={s} label={s}/>)}
+                        {(uploadResult.skills||[]).map(s=><Pill key={s} label={s}/>)}
                       </div>
+
+                      {/* Strengths + red flags */}
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
                         {uploadResult.strengths?.length>0 && (
                           <div style={{padding:"8px 10px",background:C.green+"10",border:`1px solid ${C.green}30`,borderRadius:6}}>
@@ -1204,9 +1325,12 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                      <div style={{padding:"8px 10px",background:C.faint,borderRadius:6,fontSize:10,color:C.muted,marginBottom:10}}>
-                        <span style={{color:C.amber}}>Fit: </span>{uploadResult.fitReason}
+
+                      {/* Fit reason */}
+                      <div style={{padding:"8px 10px",background:C.faint,borderRadius:6,fontSize:10,color:C.muted,marginBottom:12}}>
+                        <span style={{color:C.amber}}>Assessment: </span>{uploadResult.fitReason}
                       </div>
+
                       <div style={{display:"flex",gap:8}}>
                         <button onClick={()=>setTab("candidates")} style={{padding:"7px 14px",borderRadius:4,background:C.amber,border:"none",color:C.bg,fontFamily:FM,fontSize:9,cursor:"pointer",fontWeight:700,letterSpacing:"0.06em"}}>VIEW MY CANDIDATES →</button>
                         <button onClick={()=>{setUploadResult(null);setFileName(null);}} style={{padding:"7px 14px",borderRadius:4,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>SCREEN ANOTHER</button>
