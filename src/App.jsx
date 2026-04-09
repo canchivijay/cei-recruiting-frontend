@@ -90,13 +90,11 @@ const INTERVIEW_LEVELS = [
 // ─── AI Parser — Gemini direct (no backend needed) ───────────────────────────
 const GEMINI_KEY = "AIzaSyDh6Ll6t0JlN8tfQIeW8TkqrjO94wwpHMo";
 
-async function parseResume(base64, jobId, jobs) {
-  const job = jobs.find(j=>j.id===jobId);
-  const primarySkills   = (job?.skills||[]).join(", ") || "not specified";
-  const secondarySkills = (job?.secondarySkills||[]).join(", ") || "none";
 
-  
-const prompt = `You are an expert HR resume parser.
+async function parseResume(base64, jobId, jobs) {
+  const job = jobs.find(j => j.id === jobId);
+
+  const prompt = `You are an expert HR resume parser.
 
 Extract structured data strictly from the resume.
 DO NOT guess, infer, or fabricate any value.
@@ -105,18 +103,16 @@ If a field is missing, return null.
 CRITICAL RULES:
 1. Return a SINGLE valid JSON object
 2. Do NOT include markdown, explanations, or comments
-3. Do NOT wrap JSON in \`\` blocks
+3. Do NOT wrap JSON in \`\`\` blocks
 4. Do NOT nest contact details inside other objects
 5. Use EXACT field names as defined below
 
 CONTACT DETAILS (VERY IMPORTANT):
-- email: personal email only or null
-- phone: include country code if present or null
-- location: city, state, country or null
+- email (personal email only or null)
+- phone (include country code if present or null)
+- location (city, state, country or null)
 
-Pick the FIRST personal email or phone if multiple exist.
-
-Return exactly this JSON structure:
+Return JSON strictly in this format:
 {
   "name": string | null,
   "email": string | null,
@@ -126,14 +122,49 @@ Return exactly this JSON structure:
   "currentCompany": string | null,
   "totalExp": string | null,
   "skills": string[],
-  "education": [{"degree":string|null,"institution":string|null,"year":string|null,"specialization":string|null}],
+  "education": [
+    {
+      "degree": string | null,
+      "institution": string | null,
+      "year": string | null,
+      "specialization": string | null
+    }
+  ],
   "certifications": string[],
   "languages": string[],
   "summary": string | null
+}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: "application/pdf", data: base64 } },
+            { text: prompt }
+          ]
+        }]
+      })
+    }
+  );
+
+  const data = await res.json();
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+
+  const cleaned = rawText.replace(/```json|```/g, "").trim();
+  let parsed = JSON.parse(cleaned);
+
+  // Regex fallback if AI misses contact fields
+  const fb = regexFallback(rawText);
+  parsed.email = parsed.email || fb.email;
+  parsed.phone = parsed.phone || fb.phone;
+
+  return parsed;
 }
-
-Return STRICT JSON only.`;
-
+`;
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
