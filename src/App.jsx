@@ -42,32 +42,6 @@ const STOR_CANDS = "cei_candidates_v1";
 const STOR_INTV  = "cei_interviews_v1";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// ─── Contact Normalizer ─────────────────────────────────────────────────────
-function extractContact(parsed = {}) {
-  const email =
-    parsed.email ||
-    parsed.contact?.email ||
-    parsed.contactEmail ||
-    parsed.personalEmail ||
-    null;
-
-  const phone =
-    parsed.phone ||
-    parsed.mobile ||
-    parsed.contact?.phone ||
-    parsed.contact?.mobile ||
-    null;
-
-  const location =
-    parsed.location ||
-    parsed.currentLocation ||
-    parsed.contact?.location ||
-    null;
-
-  return { email, phone, location };
-}
-
-
 const sc = v => v >= 88 ? C.green : v >= 70 ? C.amber : C.red;
 const ini = n => n.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
 const fmt = iso => new Date(iso).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
@@ -121,57 +95,45 @@ async function parseResume(base64, jobId, jobs) {
   const primarySkills   = (job?.skills||[]).join(", ") || "not specified";
   const secondarySkills = (job?.secondarySkills||[]).join(", ") || "none";
 
-  const prompt = `You are an expert HR resume screening assistant. Analyze this resume against the job requirements below.
+  
+const prompt = `You are an expert HR resume parser.
 
-ROLE: ${job?.title || "Not specified"}
-DEPARTMENT: ${job?.dept || "Not specified"}
-PRIMARY SKILLS (must-have): ${primarySkills}
-SECONDARY SKILLS (good-to-have): ${secondarySkills}
-RESPONSIBILITIES: ${job?.responsibilities || "Not specified"}
+Extract structured data strictly from the resume.
+DO NOT guess, infer, or fabricate any value.
+If a field is missing, return null.
 
-INSTRUCTIONS:
-- Analyze resumes in Word and PDF formats for hiring or HR professionals
-- Verify exact match between required skills in the job description and skills listed in the resume
-- Focus on primary skills as specified in the job description and the resume skills section
-- Rate each skill based on presence and relevance, and provide an overall fit assessment
-- Consider years of experience, education, and certifications
-- Present results in a clear, concise summary for easy decision-making
-- Do not process resumes in languages other than English
-- Respond only to resume evaluation and skill matching
-- Always communicate in English
-- CRITICAL: You MUST extract the candidate name from the top of the resume. Look for it in the header, title, or first line. Never return "Unknown" for name.
-- CRITICAL: Extract email (look for @ symbol), phone (look for digits with spaces/dashes), location (look for city/state near top)
+CRITICAL RULES:
+1. Return a SINGLE valid JSON object
+2. Do NOT include markdown, explanations, or comments
+3. Do NOT wrap JSON in \`\` blocks
+4. Do NOT nest contact details inside other objects
+5. Use EXACT field names as defined below
 
-Return ONLY this JSON object, nothing else, no markdown, no backticks:
+CONTACT DETAILS (VERY IMPORTANT):
+- email: personal email only or null
+- phone: include country code if present or null
+- location: city, state, country or null
+
+Pick the FIRST personal email or phone if multiple exist.
+
+Return exactly this JSON structure:
 {
-  "name": "EXTRACT the candidate full name exactly as written at top of resume - this is CRITICAL",
-  "email": "email address extracted from resume or null",
-  "phone": "phone/mobile number with country code if present or null",
-  "location": "city, state/country extracted from resume or null",
-  "currentRole": "most recent job title",
-  "currentCompany": "most recent employer name or null",
-  "totalExp": "X years Y months",
-  "skills": ["up to 10 skills found in resume"],
-  "education": [
-    {"degree": "degree name", "institution": "college/university name", "year": "graduation year or null", "specialization": "field of study or null"}
-  ],
-  "certifications": ["list of certifications found or empty array"],
-  "languages": ["languages known or empty array"],
-  "summary": "2 sentence professional summary",
-  "fitScore": <overall 0-100 fit score>,
-  "fitReason": "1 sentence overall fit explanation",
-  "skillMatch": [
-    {"skill": "skill name", "required": true, "found": true, "relevance": "exact|partial|missing", "note": "brief note"}
-  ],
-  "primarySkillsMatched": <number of primary skills found>,
-  "primarySkillsTotal": <total number of primary skills required>,
-  "primaryMatchPct": <0-100 percentage of primary skills matched>,
-  "secondaryMatchPct": <0-100 percentage of secondary skills matched>,
-  "experienceMatch": "exceeds|meets|below",
-  "strengths": ["2-3 key strengths relevant to the role"],
-  "redFlags": ["concerns or empty array"],
-  "recommendation": "shortlist|consider|reject"
-}`;
+  "name": string | null,
+  "email": string | null,
+  "phone": string | null,
+  "location": string | null,
+  "currentRole": string | null,
+  "currentCompany": string | null,
+  "totalExp": string | null,
+  "skills": string[],
+  "education": [{"degree":string|null,"institution":string|null,"year":string|null,"specialization":string|null}],
+  "certifications": string[],
+  "languages": string[],
+  "summary": string | null
+}
+
+Return STRICT JSON only.`;
+
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
