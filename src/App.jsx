@@ -38,8 +38,8 @@ const STAGE_META = {
 
 
 
-const STOR_CANDS = "cei_candidates_v1";
-const STOR_INTV  = "cei_interviews_v1";
+const STOR_CANDS = "cei_candidates_v2";
+const STOR_INTV  = "cei_interviews_v2";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sc = v => v >= 88 ? C.green : v >= 70 ? C.amber : C.red;
@@ -160,9 +160,35 @@ Return ONLY this JSON object, nothing else, no markdown, no backticks:
       })
     }
   );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0,200)}`);
+  }
+
   const d = await res.json();
-  const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  return JSON.parse(txt.replace(/```json|```/g,"").trim());
+
+  // Check for Gemini API-level errors
+  if (d.error) {
+    throw new Error(`Gemini error: ${d.error.message || JSON.stringify(d.error)}`);
+  }
+
+  const txt = d.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!txt) {
+    const reason = d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || "No text returned";
+    throw new Error(`Gemini returned no text. Reason: ${reason}`);
+  }
+
+  // Strip markdown fences and parse JSON
+  const clean = txt.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim();
+  const parsed = JSON.parse(clean);
+
+  // Validate — if name is still missing/Unknown, try to extract from raw text
+  if (!parsed.name || parsed.name === "Unknown" || parsed.name.includes("EXTRACT")) {
+    throw new Error("Could not extract candidate name from resume. Please ensure the PDF is not password-protected or image-only.");
+  }
+
+  return parsed;
 }
 
 // ─── CSV Report Generator ─────────────────────────────────────────────────────
@@ -310,7 +336,8 @@ export default function App() {
     Promise.all([load(STOR_RECS), load(STOR_JOBS), load(STOR_CANDS), load(STOR_INTV)]).then(([r, jo, c, i]) => {
       if (r)  setRecruiters(r);
       if (jo) setJobs(jo);
-      if (c)  setCandidates(c);
+      // Filter out corrupted candidates (name=Unknown AND score=50 = failed parse)
+      if (c)  setCandidates(c.filter(x => !(x.name==="Unknown" && x.score===50)));
       if (i)  setInterviews(i);
       setLoaded(true);
     });
@@ -358,6 +385,8 @@ export default function App() {
   const updateStatus = (id, interviewStatus) => setCandidates(p => p.map(c => c.id===id ? {...c, interviewStatus} : c));
   const updateInterview = (id, patch) => setInterviews(p => p.map(i => i.id===id ? {...i,...patch} : i));
   const updateFeedback = (candId, feedback) => setCandidates(p => p.map(c => c.id===candId ? {...c, feedback} : c));
+  const deleteCandidate = (id) => setCandidates(p => p.filter(c => c.id !== id));
+  const clearUnknownCandidates = () => setCandidates(p => p.filter(c => !(c.name==="Unknown" && c.score===50)));
 
   const handleFile = useCallback(async (file) => {
     if (!file || file.type !== "application/pdf") { setUploadError("Please upload a PDF."); return; }
@@ -976,13 +1005,20 @@ export default function App() {
           {/* ══ MY CANDIDATES ══ */}
           {tab==="candidates" && (
             <div className="fi">
-              {/* Filter pills */}
-              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              {/* Filter pills + Clear Unknown */}
+              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
                 {["all","pending","approved","rejected","hold"].map(s=>(
                   <button key={s} onClick={()=>{}} style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${s==="all"?C.amber:STATUS_META[s]?.color||C.border}`,background:"transparent",color:s==="all"?C.amber:STATUS_META[s]?.color||C.muted,fontFamily:FM,fontSize:13,cursor:"pointer"}}>
                     {s==="all"?"ALL":STATUS_META[s]?.label?.toUpperCase()}
                   </button>
                 ))}
+                <div style={{flex:1}}/>
+                {candidates.filter(x=>x.name==="Unknown"&&x.score===50).length>0 && (
+                  <button onClick={clearUnknownCandidates}
+                    style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${C.red}50`,background:C.red+"10",color:C.red,fontFamily:FM,fontSize:12,cursor:"pointer"}}>
+                    🗑 Clear {candidates.filter(x=>x.name==="Unknown"&&x.score===50).length} Failed Scans
+                  </button>
+                )}
               </div>
 
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -1181,6 +1217,8 @@ export default function App() {
                             </select>
                             <button onClick={()=>{setEditingCand(c.id);setExpandedCandId(null);setEditForm({name:c.name,role:c.role||"",exp:c.exp||"",email:c.email||"",phone:c.phone||"",location:c.location||"",interviewStatus:c.interviewStatus||"pending",stage:c.stage||"Applied",skills:(c.skills||[]).join(", ")});}}
                               style={{marginLeft:"auto",padding:"6px 16px",borderRadius:6,border:`1px solid ${C.amber}60`,background:C.amber+"12",color:C.amber,fontFamily:FM,fontSize:13,cursor:"pointer",fontWeight:600}}>✏ EDIT DETAILS</button>
+                            <button onClick={()=>deleteCandidate(c.id)}
+                              style={{padding:"6px 14px",borderRadius:6,border:`1px solid ${C.red}50`,background:C.red+"10",color:C.red,fontFamily:FM,fontSize:13,cursor:"pointer"}}>🗑 DELETE</button>
                           </div>
                         </div>
                       )}
