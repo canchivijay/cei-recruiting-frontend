@@ -90,81 +90,62 @@ const INTERVIEW_LEVELS = [
 // ─── AI Parser — Gemini direct (no backend needed) ───────────────────────────
 const GEMINI_KEY = "AIzaSyDh6Ll6t0JlN8tfQIeW8TkqrjO94wwpHMo";
 
-
 async function parseResume(base64, jobId, jobs) {
-  const job = jobs.find(j => j.id === jobId);
+  const job = jobs.find(j=>j.id===jobId);
+  const primarySkills   = (job?.skills||[]).join(", ") || "not specified";
+  const secondarySkills = (job?.secondarySkills||[]).join(", ") || "none";
 
-  const prompt = `You are an expert HR resume parser.
+  const prompt = `You are an expert HR resume screening assistant. Analyze this resume against the job requirements below.
 
-Extract structured data strictly from the resume.
-DO NOT guess, infer, or fabricate any value.
-If a field is missing, return null.
+ROLE: ${job?.title || "Not specified"}
+DEPARTMENT: ${job?.dept || "Not specified"}
+PRIMARY SKILLS (must-have): ${primarySkills}
+SECONDARY SKILLS (good-to-have): ${secondarySkills}
+RESPONSIBILITIES: ${job?.responsibilities || "Not specified"}
 
-CRITICAL RULES:
-1. Return a SINGLE valid JSON object
-2. Do NOT include markdown, explanations, or comments
-3. Do NOT wrap JSON in \`\`\` blocks
-4. Do NOT nest contact details inside other objects
-5. Use EXACT field names as defined below
+INSTRUCTIONS:
+- Analyze resumes in Word and PDF formats for hiring or HR professionals
+- Verify exact match between required skills in the job description and skills listed in the resume
+- Focus on primary skills as specified in the job description and the resume skills section
+- Rate each skill based on presence and relevance, and provide an overall fit assessment
+- Consider years of experience, education, and certifications
+- Present results in a clear, concise summary for easy decision-making
+- Do not process resumes in languages other than English
+- Respond only to resume evaluation and skill matching
+- Always communicate in English
+- CRITICAL: You MUST extract the candidate name from the top of the resume. Look for it in the header, title, or first line. Never return "Unknown" for name.
+- CRITICAL: Extract email (look for @ symbol), phone (look for digits with spaces/dashes), location (look for city/state near top)
 
-CONTACT DETAILS (VERY IMPORTANT):
-- email (personal email only or null)
-- phone (include country code if present or null)
-- location (city, state, country or null)
-
-Return JSON strictly in this format:
+Return ONLY this JSON object, nothing else, no markdown, no backticks:
 {
-  "name": string | null,
-  "email": string | null,
-  "phone": string | null,
-  "location": string | null,
-  "currentRole": string | null,
-  "currentCompany": string | null,
-  "totalExp": string | null,
-  "skills": string[],
+  "name": "EXTRACT the candidate full name exactly as written at top of resume - this is CRITICAL",
+  "email": "email address extracted from resume or null",
+  "phone": "phone/mobile number with country code if present or null",
+  "location": "city, state/country extracted from resume or null",
+  "currentRole": "most recent job title",
+  "currentCompany": "most recent employer name or null",
+  "totalExp": "X years Y months",
+  "skills": ["up to 10 skills found in resume"],
   "education": [
-    {
-      "degree": string | null,
-      "institution": string | null,
-      "year": string | null,
-      "specialization": string | null
-    }
+    {"degree": "degree name", "institution": "college/university name", "year": "graduation year or null", "specialization": "field of study or null"}
   ],
-  "certifications": string[],
-  "languages": string[],
-  "summary": string | null
+  "certifications": ["list of certifications found or empty array"],
+  "languages": ["languages known or empty array"],
+  "summary": "2 sentence professional summary",
+  "fitScore": <overall 0-100 fit score>,
+  "fitReason": "1 sentence overall fit explanation",
+  "skillMatch": [
+    {"skill": "skill name", "required": true, "found": true, "relevance": "exact|partial|missing", "note": "brief note"}
+  ],
+  "primarySkillsMatched": <number of primary skills found>,
+  "primarySkillsTotal": <total number of primary skills required>,
+  "primaryMatchPct": <0-100 percentage of primary skills matched>,
+  "secondaryMatchPct": <0-100 percentage of secondary skills matched>,
+  "experienceMatch": "exceeds|meets|below",
+  "strengths": ["2-3 key strengths relevant to the role"],
+  "redFlags": ["concerns or empty array"],
+  "recommendation": "shortlist|consider|reject"
 }`;
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inline_data: { mime_type: "application/pdf", data: base64 } },
-            { text: prompt }
-          ]
-        }]
-      })
-    }
-  );
-
-  const data = await res.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-
-  const cleaned = rawText.replace(/```json|```/g, "").trim();
-  let parsed = JSON.parse(cleaned);
-
-  // Regex fallback if AI misses contact fields
-  const fb = regexFallback(rawText);
-  parsed.email = parsed.email || fb.email;
-  parsed.phone = parsed.phone || fb.phone;
-
-  return parsed;
-}
-`;
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
@@ -995,79 +976,167 @@ export default function App() {
           {/* ══ MY CANDIDATES ══ */}
           {tab==="candidates" && (
             <div className="fi">
-              <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+              {/* Filter pills */}
+              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
                 {["all","pending","approved","rejected","hold"].map(s=>(
-                  <button key={s} onClick={()=>{}} style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${s==="all"?C.amber:STATUS_META[s]?.color||C.border}`,background:"transparent",color:s==="all"?C.amber:STATUS_META[s]?.color||C.muted,fontFamily:FM,fontSize:9,cursor:"pointer",letterSpacing:"0.06em"}}>
+                  <button key={s} onClick={()=>{}} style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${s==="all"?C.amber:STATUS_META[s]?.color||C.border}`,background:"transparent",color:s==="all"?C.amber:STATUS_META[s]?.color||C.muted,fontFamily:FM,fontSize:13,cursor:"pointer"}}>
                     {s==="all"?"ALL":STATUS_META[s]?.label?.toUpperCase()}
                   </button>
                 ))}
               </div>
+
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {myCandidates.map(c=>{
-                  const job = jobs.find(j=>j.id===c.jobId);
-                  const sm = STATUS_META[c.interviewStatus];
+                  const job        = jobs.find(j=>j.id===c.jobId);
+                  const sm         = STATUS_META[c.interviewStatus]||STATUS_META.pending;
                   const isEditing  = editingCand === c.id;
                   const isExpanded = expandedCandId === c.id;
                   const iStyle     = {background:C.surface,border:`1px solid ${C.border}`,borderRadius:5,padding:"8px 12px",color:C.cream,fontFamily:FM,fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
+
                   return (
-                    <div key={c.id} style={{background:C.card,border:`1px solid ${isEditing?C.amber+"80":isExpanded?C.blue+"60":C.border}`,borderRadius:8,overflow:"hidden"}}>
-                      {/* Clickable summary row */}
+                    <div key={c.id} style={{background:C.card,border:`1px solid ${isEditing?C.amber+"80":isExpanded?C.blue+"50":C.border}`,borderRadius:10,overflow:"hidden",transition:"border-color 0.15s"}}>
+
+                      {/* ── Summary Row (always visible, clickable) ── */}
                       {!isEditing && (
                         <div onClick={()=>setExpandedCandId(isExpanded?null:c.id)}
-                          style={{padding:"12px 16px",cursor:"pointer",display:"flex",gap:12,alignItems:"center"}}>
-                          <Avatar text={c.avatar||ini(c.name||"?")} size={40} color={sc(c.score)}/>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:16,color:C.cream,fontWeight:500}}>{c.name}</div>
-                            <div style={{fontSize:13,color:C.muted,marginTop:2}}>{c.role}{c.currentCompany?` @ ${c.currentCompany}`:""} · {c.exp} · {job?.title||"—"}</div>
+                          style={{padding:"14px 16px",cursor:"pointer",display:"flex",gap:12,alignItems:"center",background:isExpanded?C.faint:"transparent"}}>
+                          <Avatar text={c.avatar||ini(c.name||"?")} size={42} color={sc(c.score)}/>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:16,color:C.cream,fontWeight:600}}>{c.name}</div>
+                            <div style={{fontSize:13,color:C.muted,marginTop:2}}>{c.role}{c.currentCompany?` @ ${c.currentCompany}`:""} · {c.exp}</div>
+                            <div style={{fontSize:12,color:C.muted,marginTop:1}}>{job?.title||"No job assigned"}</div>
                           </div>
-                          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                            <Badge label={c.stage} color={STAGE_META[c.stage]?.color||C.muted}/>
-                            <Badge label={sm?.label||"Pending"} color={sm?.color||C.muted}/>
-                            {c.source==="ai" && <Badge label="AI" color={C.purple}/>}
-                            <span style={{fontSize:18,color:C.muted,marginLeft:4}}>{isExpanded?"▲":"▼"}</span>
+                          <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
+                            <div style={{display:"flex",gap:6}}>
+                              <Badge label={c.stage} color={STAGE_META[c.stage]?.color||C.muted}/>
+                              <Badge label={sm.label} color={sm.color}/>
+                              {c.source==="ai"&&<Badge label="AI" color={C.purple}/>}
+                              {c.recommendation&&<Badge label={c.recommendation} color={c.recommendation==="shortlist"?C.green:c.recommendation==="reject"?C.red:C.orange}/>}
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontFamily:FD,fontSize:22,color:sc(c.score)}}>{c.score}%</span>
+                              <span style={{fontSize:16,color:C.muted}}>{isExpanded?"▲":"▼"}</span>
+                            </div>
                           </div>
                         </div>
                       )}
 
-                      {/* Expanded full profile */}
-                      {!isEditing && isExpanded && (
-                        <div style={{borderTop:`1px solid ${C.border}`,padding:"16px 16px",background:C.surface}}>
-                          {/* Score bar */}
-                          <div style={{marginBottom:14}}><Bar val={c.score}/></div>
-                          {/* Full contact grid */}
-                          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14,padding:"14px",background:C.card,borderRadius:8,border:`1px solid ${C.border}`}}>
-                            {[{l:"FULL NAME",v:c.name,col:C.cream},{l:"EMAIL ID",v:c.email||"Not found",col:c.email?C.teal:C.muted},{l:"PHONE NUMBER",v:c.phone||"Not found",col:c.phone?C.teal:C.muted},{l:"LOCATION",v:c.location||"Not found",col:c.location?C.cream:C.muted}].map(({l,v,col})=>(
-                              <div key={l}>
-                                <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>{l}</div>
-                                <div style={{fontSize:14,color:col,fontWeight:500}}>{v}</div>
-                              </div>
-                            ))}
-                            {c.education&&<div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EDUCATION</div><div style={{fontSize:13,color:C.cream}}>{c.education}</div></div>}
-                            {c.certifications?.length>0&&<div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.muted,marginBottom:5}}>CERTIFICATIONS</div><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{c.certifications.map(x=><span key={x} style={{padding:"3px 9px",borderRadius:4,fontSize:12,background:C.teal+"15",color:C.teal,fontFamily:FM}}>{x}</span>)}</div></div>}
+                      {/* ── Compact score bar (collapsed) ── */}
+                      {!isEditing && !isExpanded && (
+                        <div style={{padding:"0 16px 12px 16px"}}>
+                          <Bar val={c.score}/>
+                          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:6}}>
+                            {(c.skills||[]).slice(0,5).map(s=><Pill key={s} label={s}/>)}
+                            {(c.skills||[]).length>5&&<span style={{fontSize:12,color:C.muted}}>+{(c.skills||[]).length-5} more</span>}
                           </div>
-                          {/* Match scores */}
-                          {c.primaryMatchPct>0&&(
-                            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-                              {[{l:"OVERALL FIT",v:c.score,col:sc(c.score)},{l:"PRIMARY SKILLS",v:c.primaryMatchPct||0,col:sc(c.primaryMatchPct||0),sub:`${c.primarySkillsMatched||0}/${c.primarySkillsTotal||0} matched`},{l:"SECONDARY SKILLS",v:c.secondaryMatchPct||0,col:C.blue,sub:c.experienceMatch}].map(m=>(
-                                <div key={m.l} style={{padding:"10px",background:m.col+"12",border:`1px solid ${m.col}30`,borderRadius:6,textAlign:"center"}}>
-                                  <div style={{fontFamily:FD,fontSize:28,color:m.col,lineHeight:1}}>{m.v}%</div>
-                                  <div style={{fontSize:11,color:C.muted,marginTop:3}}>{m.l}</div>
-                                  {m.sub&&<div style={{fontSize:11,color:C.muted}}>{m.sub}</div>}
+                        </div>
+                      )}
+
+                      {/* ── Expanded full profile ── */}
+                      {!isEditing && isExpanded && (
+                        <div style={{padding:"16px",borderTop:`1px solid ${C.border}`}}>
+
+                          {/* Contact info grid */}
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16,padding:"14px",background:C.card,borderRadius:8,border:`1px solid ${C.border}`}}>
+                            <div>
+                              <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>FULL NAME</div>
+                              <div style={{fontSize:15,color:C.cream,fontWeight:600}}>{c.name||"—"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>CURRENT ROLE</div>
+                              <div style={{fontSize:14,color:C.cream}}>{c.role||"—"}{c.currentCompany?<span style={{color:C.muted}}> @ {c.currentCompany}</span>:""}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EMAIL ID</div>
+                              <div style={{fontSize:14,color:c.email?C.teal:C.muted,fontWeight:c.email?500:400}}>{c.email||"Not found in resume"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>PHONE NUMBER</div>
+                              <div style={{fontSize:14,color:c.phone?C.teal:C.muted,fontWeight:c.phone?500:400}}>{c.phone||"Not found in resume"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>LOCATION</div>
+                              <div style={{fontSize:14,color:c.location?C.cream:C.muted}}>{c.location||"Not found in resume"}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EXPERIENCE</div>
+                              <div style={{fontSize:14,color:C.cream}}>{c.exp||"—"}</div>
+                            </div>
+                            {c.education&&c.education!=="—"&&(
+                              <div style={{gridColumn:"1/-1"}}>
+                                <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EDUCATION</div>
+                                <div style={{fontSize:14,color:C.cream}}>{c.education}</div>
+                              </div>
+                            )}
+                            {c.certifications?.length>0&&(
+                              <div style={{gridColumn:"1/-1"}}>
+                                <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:6}}>CERTIFICATIONS</div>
+                                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{c.certifications.map(x=><span key={x} style={{padding:"3px 10px",borderRadius:4,fontSize:12,background:C.teal+"15",color:C.teal,fontFamily:FM,border:`0.5px solid ${C.teal}40`}}>{x}</span>)}</div>
+                              </div>
+                            )}
+                            {c.languages?.length>0&&(
+                              <div style={{gridColumn:"1/-1"}}>
+                                <div style={{fontSize:11,color:C.muted,letterSpacing:"0.08em",marginBottom:6}}>LANGUAGES</div>
+                                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{c.languages.map(l=><span key={l} style={{padding:"3px 10px",borderRadius:4,fontSize:12,background:C.purple+"15",color:C.purple,fontFamily:FM,border:`0.5px solid ${C.purple}40`}}>{l}</span>)}</div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Match % bars */}
+                          {(c.primaryMatchPct>0||c.score>0)&&(
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+                              {[
+                                {l:"OVERALL FIT",    v:c.score||0,            col:sc(c.score||0),            sub:null},
+                                {l:"PRIMARY SKILLS", v:c.primaryMatchPct||0,  col:sc(c.primaryMatchPct||0),  sub:`${c.primarySkillsMatched||0}/${c.primarySkillsTotal||0} matched`},
+                                {l:"SECONDARY",      v:c.secondaryMatchPct||0,col:C.blue,                    sub:c.experienceMatch||null},
+                              ].map(m=>(
+                                <div key={m.l} style={{padding:"10px 12px",background:m.col+"12",border:`1px solid ${m.col}30`,borderRadius:8,textAlign:"center"}}>
+                                  <div style={{fontFamily:FD,fontSize:30,color:m.col,lineHeight:1}}>{m.v}%</div>
+                                  <div style={{fontSize:11,color:C.muted,marginTop:4,letterSpacing:"0.06em"}}>{m.l}</div>
+                                  {m.sub&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>{m.sub}</div>}
+                                  <div style={{height:3,background:C.border,borderRadius:2,marginTop:6,overflow:"hidden"}}>
+                                    <div style={{width:`${m.v}%`,height:"100%",background:m.col,borderRadius:2}}/>
+                                  </div>
                                 </div>
                               ))}
                             </div>
                           )}
+
                           {/* Skills */}
-                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>{(c.skills||[]).map(s=><Pill key={s} label={s}/>)}</div>
-                          {c.summary&&<div style={{fontSize:13,color:C.muted,lineHeight:1.6,marginBottom:12}}>{c.summary}</div>}
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                            {(c.skills||[]).map(s=><Pill key={s} label={s}/>)}
+                          </div>
+
+                          {/* Summary */}
+                          {c.summary&&<div style={{fontSize:13,color:C.muted,lineHeight:1.7,marginBottom:12,padding:"10px 12px",background:C.faint,borderRadius:6}}>{c.summary}</div>}
+
+                          {/* Strengths + Red flags */}
                           {(c.strengths?.length>0||c.redFlags?.length>0)&&(
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-                              {c.strengths?.length>0&&<div style={{padding:"8px 10px",background:C.green+"10",border:`1px solid ${C.green}30`,borderRadius:6}}><div style={{fontSize:11,color:C.green,marginBottom:4}}>STRENGTHS</div>{c.strengths.map(s=><div key={s} style={{fontSize:13,color:C.cream,marginBottom:2}}>• {s}</div>)}</div>}
-                              {c.redFlags?.length>0&&<div style={{padding:"8px 10px",background:C.red+"10",border:`1px solid ${C.red}30`,borderRadius:6}}><div style={{fontSize:11,color:C.red,marginBottom:4}}>RED FLAGS</div>{c.redFlags.map(f=><div key={f} style={{fontSize:13,color:C.muted,marginBottom:2}}>• {f}</div>)}</div>}
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+                              {c.strengths?.length>0&&(
+                                <div style={{padding:"10px 12px",background:C.green+"10",border:`1px solid ${C.green}30`,borderRadius:8}}>
+                                  <div style={{fontSize:11,color:C.green,letterSpacing:"0.08em",marginBottom:6}}>STRENGTHS</div>
+                                  {c.strengths.map(s=><div key={s} style={{fontSize:13,color:C.cream,marginBottom:3}}>• {s}</div>)}
+                                </div>
+                              )}
+                              {c.redFlags?.length>0&&(
+                                <div style={{padding:"10px 12px",background:C.red+"10",border:`1px solid ${C.red}30`,borderRadius:8}}>
+                                  <div style={{fontSize:11,color:C.red,letterSpacing:"0.08em",marginBottom:6}}>RED FLAGS</div>
+                                  {c.redFlags.map(f=><div key={f} style={{fontSize:13,color:C.muted,marginBottom:3}}>• {f}</div>)}
+                                </div>
+                              )}
                             </div>
                           )}
-                          {/* Interview Rounds */}
-                          <div style={{marginBottom:12}}>
+
+                          {/* Fit reason */}
+                          {c.fitReason&&(
+                            <div style={{padding:"10px 12px",background:C.faint,borderRadius:6,fontSize:13,color:C.muted,marginBottom:14}}>
+                              <span style={{color:C.amber,fontWeight:600}}>AI Assessment: </span>{c.fitReason}
+                            </div>
+                          )}
+
+                          {/* Interview rounds */}
+                          <div style={{marginBottom:14}}>
                             <div style={{fontSize:12,color:C.muted,letterSpacing:"0.08em",marginBottom:8,display:"flex",justifyContent:"space-between"}}>
                               <span>INTERVIEW ROUNDS</span>
                               <span style={{color:C.amber}}>{interviews.filter(i=>i.candidateId===c.id).length} SCHEDULED</span>
@@ -1077,168 +1146,89 @@ export default function App() {
                                 const round=interviews.find(i=>i.candidateId===c.id&&i.level===lvl.id);
                                 const rs=round?INTERVIEW_STATUS_META[round.status]:null;
                                 return (
-                                  <div key={lvl.id} style={{flex:1,background:round?lvl.color+"12":C.faint,border:`1px solid ${round?lvl.color+"50":C.border}`,borderRadius:6,padding:"10px",textAlign:"center"}}>
-                                    <div style={{fontSize:12,color:lvl.color,fontWeight:700,marginBottom:4}}>{lvl.label}</div>
-                                    {round?(<>
-                                      <div style={{fontSize:12,color:C.muted,marginBottom:4}}>{round.date} · {round.time}</div>
-                                      <select value={round.status} onChange={e=>updateInterview(round.id,{status:e.target.value})}
-                                        style={{width:"100%",background:rs?.color+"15",border:`1px solid ${rs?.color}50`,borderRadius:4,color:rs?.color,fontFamily:FM,fontSize:12,padding:"3px 6px",cursor:"pointer",outline:"none",fontWeight:700}}>
-                                        {["scheduled","completed","approved","cancelled"].map(s=><option key={s} value={s}>{INTERVIEW_STATUS_META[s].label}</option>)}
-                                      </select>
-                                    </>):(<div style={{fontSize:12,color:C.muted,opacity:0.5}}>Not scheduled</div>)}
+                                  <div key={lvl.id} style={{flex:1,background:round?lvl.color+"12":C.faint,border:`1px solid ${round?lvl.color+"50":C.border}`,borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
+                                    <div style={{fontSize:13,color:lvl.color,fontWeight:700,marginBottom:5}}>{lvl.label}</div>
+                                    {round?(
+                                      <>
+                                        <div style={{fontSize:12,color:C.muted,marginBottom:3}}>{round.date}</div>
+                                        <div style={{fontSize:12,color:C.muted,marginBottom:6}}>{round.time} · {round.type}</div>
+                                        <select value={round.status} onChange={e=>updateInterview(round.id,{status:e.target.value})}
+                                          style={{width:"100%",background:rs?.color+"15",border:`1px solid ${rs?.color}50`,borderRadius:4,color:rs?.color,fontFamily:FM,fontSize:12,padding:"4px 6px",cursor:"pointer",outline:"none",fontWeight:700}}>
+                                          {["scheduled","completed","approved","cancelled"].map(s=><option key={s} value={s}>{INTERVIEW_STATUS_META[s].label}</option>)}
+                                        </select>
+                                      </>
+                                    ):(
+                                      <div style={{fontSize:12,color:C.muted,opacity:0.5}}>Not scheduled</div>
+                                    )}
                                   </div>
                                 );
                               })}
                             </div>
                           </div>
-                          {/* Status + Stage + Edit */}
-                          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+
+                          {/* Status + Stage controls */}
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",paddingTop:12,borderTop:`1px solid ${C.border}`}}>
                             <span style={{fontSize:13,color:C.muted}}>STATUS:</span>
                             {["approved","rejected","hold","pending"].map(st=>(
                               <button key={st} onClick={()=>updateStatus(c.id,st)}
-                                style={{padding:"5px 12px",borderRadius:4,border:`0.5px solid ${STATUS_META[st].color}${c.interviewStatus===st?"":"40"}`,background:c.interviewStatus===st?STATUS_META[st].color+"20":"transparent",color:STATUS_META[st].color,fontFamily:FM,fontSize:12,cursor:"pointer",fontWeight:c.interviewStatus===st?"700":"400"}}>
+                                style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${STATUS_META[st].color}${c.interviewStatus===st?"":"40"}`,background:c.interviewStatus===st?STATUS_META[st].color+"20":"transparent",color:STATUS_META[st].color,fontFamily:FM,fontSize:12,cursor:"pointer",fontWeight:c.interviewStatus===st?"700":"400"}}>
                                 {STATUS_META[st].label.toUpperCase()}
                               </button>
                             ))}
-                            <span style={{fontSize:13,color:C.muted,marginLeft:6}}>STAGE:</span>
-                            <select value={c.stage} onChange={e=>updateStage(c.id,e.target.value)} style={{background:C.faint,border:`0.5px solid ${C.border}`,borderRadius:4,color:C.cream,fontFamily:FM,fontSize:13,padding:"5px 10px",cursor:"pointer"}}>
+                            <span style={{fontSize:13,color:C.muted,marginLeft:4}}>STAGE:</span>
+                            <select value={c.stage} onChange={e=>updateStage(c.id,e.target.value)} style={{background:C.faint,border:`1px solid ${C.border}`,borderRadius:6,color:C.cream,fontFamily:FM,fontSize:13,padding:"5px 10px",cursor:"pointer"}}>
                               {STAGES.map(s=><option key={s}>{s}</option>)}
                             </select>
                             <button onClick={()=>{setEditingCand(c.id);setExpandedCandId(null);setEditForm({name:c.name,role:c.role||"",exp:c.exp||"",email:c.email||"",phone:c.phone||"",location:c.location||"",interviewStatus:c.interviewStatus||"pending",stage:c.stage||"Applied",skills:(c.skills||[]).join(", ")});}}
-                              style={{marginLeft:"auto",padding:"5px 14px",borderRadius:4,border:`0.5px solid ${C.amber}60`,background:C.amber+"12",color:C.amber,fontFamily:FM,fontSize:12,cursor:"pointer"}}>✏ EDIT</button>
+                              style={{marginLeft:"auto",padding:"6px 16px",borderRadius:6,border:`1px solid ${C.amber}60`,background:C.amber+"12",color:C.amber,fontFamily:FM,fontSize:13,cursor:"pointer",fontWeight:600}}>✏ EDIT DETAILS</button>
                           </div>
                         </div>
                       )}
 
-                      {/* Editing form placeholder - starts below */}
-                      {!isEditing && !isExpanded && (
-                        <div style={{padding:"0 16px 10px 16px"}}>
-                          <div style={{marginBottom:6}}><Bar val={c.score}/></div>
-                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{(c.skills||[]).slice(0,4).map(s=><Pill key={s} label={s}/>)}</div>
-                        </div>
-                      )}
-
-                      {/* Full fake section for edit form compat */}
-                      {!isEditing && false && (
-                        <div style={{flex:1}}>
-                          <div style={{marginBottom:8}}><Bar val={c.score}/></div>
-                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-                            {(c.skills||[]).map(s=><Pill key={s} label={s}/>)}
-                          </div>
-
-                            {/* ── Interview Rounds ── */}
-                            {(() => {
-                              const candIntviews = interviews.filter(i=>i.candidateId===c.id);
-                              return (
-                                <div style={{marginBottom:12}}>
-                                  <div style={{fontSize:9,color:C.muted,letterSpacing:"0.1em",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                                    <span>INTERVIEW ROUNDS</span>
-                                    <span style={{color:C.amber}}>{candIntviews.length} SCHEDULED</span>
-                                  </div>
-                                  {/* Level tracker row */}
-                                  <div style={{display:"flex",gap:8,marginBottom:candIntviews.length>0?10:0}}>
-                                    {INTERVIEW_LEVELS.map(lvl=>{
-                                      const round = candIntviews.find(i=>i.level===lvl.id);
-                                      const sm = round ? INTERVIEW_STATUS_META[round.status] : null;
-                                      return (
-                                        <div key={lvl.id} style={{flex:1,background:round?lvl.color+"12":C.faint,border:`1px solid ${round?lvl.color+"50":C.border}`,borderRadius:6,padding:"8px 10px",textAlign:"center",transition:"all 0.2s"}}>
-                                          <div style={{fontSize:9,color:lvl.color,fontFamily:FM,fontWeight:700,letterSpacing:"0.08em",marginBottom:4}}>{lvl.label}</div>
-                                          {round ? (
-                                            <>
-                                              <div style={{fontSize:9,color:C.muted,marginBottom:4}}>{round.date} · {round.time}</div>
-                                              <div style={{fontSize:9,color:C.muted,marginBottom:6}}>{round.type}</div>
-                                              <select
-                                                value={round.status}
-                                                onChange={e=>updateInterview(round.id,{status:e.target.value})}
-                                                style={{width:"100%",background:sm?.color+"15",border:`1px solid ${sm?.color}50`,borderRadius:4,color:sm?.color,fontFamily:FM,fontSize:9,padding:"3px 6px",cursor:"pointer",outline:"none",fontWeight:700}}>
-                                                {["scheduled","completed","approved","cancelled"].map(s=>(
-                                                  <option key={s} value={s} style={{background:C.surface,color:C.cream}}>{INTERVIEW_STATUS_META[s].label}</option>
-                                                ))}
-                                              </select>
-                                            </>
-                                          ) : (
-                                            <div style={{fontSize:9,color:C.muted,opacity:0.5}}>Not scheduled</div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                              <span style={{fontSize:9,color:C.muted,letterSpacing:"0.08em"}}>STATUS:</span>
-                              {["approved","rejected","hold","pending"].map(st=>(
-                                <button key={st} onClick={()=>updateStatus(c.id,st)} style={{padding:"4px 10px",borderRadius:4,border:`0.5px solid ${STATUS_META[st].color}${c.interviewStatus===st?"":"40"}`,background:c.interviewStatus===st?STATUS_META[st].color+"20":"transparent",color:STATUS_META[st].color,fontFamily:FM,fontSize:9,cursor:"pointer",fontWeight:c.interviewStatus===st?"700":"400",letterSpacing:"0.06em"}}>
-                                  {STATUS_META[st].label.toUpperCase()}
-                                </button>
-                              ))}
-                              <span style={{fontSize:9,color:C.muted,marginLeft:6,letterSpacing:"0.06em"}}>STAGE:</span>
-                              <select value={c.stage} onChange={e=>updateStage(c.id,e.target.value)} style={{background:C.faint,border:`0.5px solid ${C.border}`,borderRadius:4,color:C.cream,fontFamily:FM,fontSize:9,padding:"4px 8px",cursor:"pointer"}}>
-                                {STAGES.map(s=><option key={s} value={s}>{s}</option>)}
-                              </select>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        /* ── Edit Form ── */
-                        <div className="fi">
-                          <div style={{fontSize:9,color:C.amber,letterSpacing:"0.1em",marginBottom:14}}>EDITING — {c.name}</div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                      {/* ── Edit Form ── */}
+                      {isEditing && (
+                        <div style={{padding:"16px"}}>
+                          <div style={{fontSize:14,color:C.amber,fontWeight:700,marginBottom:16}}>EDITING — {c.name}</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+                            {[{k:"name",l:"FULL NAME"},{k:"role",l:"CURRENT ROLE"},{k:"email",l:"EMAIL ID"},{k:"phone",l:"PHONE NUMBER"},{k:"location",l:"LOCATION"},{k:"exp",l:"EXPERIENCE"}].map(({k,l})=>(
+                              <div key={k}>
+                                <div style={{fontSize:12,color:C.muted,letterSpacing:"0.08em",marginBottom:5}}>{l}</div>
+                                <input value={editForm[k]||""} onChange={e=>setEditForm(f=>({...f,[k]:e.target.value}))} style={iStyle}/>
+                              </div>
+                            ))}
                             <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>FULL NAME</div>
-                              <input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} style={iStyle}/>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>CURRENT ROLE</div>
-                              <input value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} style={iStyle}/>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EMAIL ID</div>
-                              <input type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} placeholder="candidate@email.com" style={iStyle}/>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>MOBILE NUMBER</div>
-                              <input type="tel" value={editForm.phone} onChange={e=>setEditForm(f=>({...f,phone:e.target.value}))} placeholder="+91 98765 43210" style={iStyle}/>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>LOCATION</div>
-                              <input value={editForm.location} onChange={e=>setEditForm(f=>({...f,location:e.target.value}))} placeholder="Chennai, Tamil Nadu" style={iStyle}/>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>EXPERIENCE</div>
-                              <input value={editForm.exp} onChange={e=>setEditForm(f=>({...f,exp:e.target.value}))} placeholder="e.g. 5 years" style={iStyle}/>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>INTERVIEW STATUS</div>
+                              <div style={{fontSize:12,color:C.muted,letterSpacing:"0.08em",marginBottom:5}}>INTERVIEW STATUS</div>
                               <select value={editForm.interviewStatus} onChange={e=>setEditForm(f=>({...f,interviewStatus:e.target.value}))} style={{...iStyle,cursor:"pointer"}}>
                                 {["pending","approved","rejected","hold"].map(s=><option key={s} value={s}>{STATUS_META[s].label}</option>)}
                               </select>
                             </div>
                             <div>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>PIPELINE STAGE</div>
+                              <div style={{fontSize:12,color:C.muted,letterSpacing:"0.08em",marginBottom:5}}>PIPELINE STAGE</div>
                               <select value={editForm.stage} onChange={e=>setEditForm(f=>({...f,stage:e.target.value}))} style={{...iStyle,cursor:"pointer"}}>
-                                {STAGES.map(s=><option key={s} value={s}>{s}</option>)}
+                                {STAGES.map(s=><option key={s}>{s}</option>)}
                               </select>
                             </div>
                             <div style={{gridColumn:"1/-1"}}>
-                              <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",marginBottom:4}}>SKILLS <span style={{color:C.muted,fontWeight:400}}>(comma-separated)</span></div>
-                              <input value={editForm.skills} onChange={e=>setEditForm(f=>({...f,skills:e.target.value}))} placeholder="React, TypeScript, Node.js" style={iStyle}/>
+                              <div style={{fontSize:12,color:C.muted,letterSpacing:"0.08em",marginBottom:5}}>SKILLS <span style={{opacity:0.6}}>(comma-separated)</span></div>
+                              <input value={editForm.skills||""} onChange={e=>setEditForm(f=>({...f,skills:e.target.value}))} placeholder="React, TypeScript, Node.js" style={iStyle}/>
                             </div>
                           </div>
                           <div style={{display:"flex",gap:8}}>
-                            <button onClick={()=>saveEditCand(c.id)} style={{padding:"7px 18px",borderRadius:4,background:C.amber,border:"none",color:C.bg,fontFamily:FM,fontSize:10,cursor:"pointer",fontWeight:700,letterSpacing:"0.06em"}}>SAVE CHANGES</button>
-                            <button onClick={()=>setEditingCand(null)} style={{padding:"7px 14px",borderRadius:4,border:`0.5px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:10,cursor:"pointer",letterSpacing:"0.06em"}}>CANCEL</button>
+                            <button onClick={()=>saveEditCand(c.id)} style={{padding:"8px 20px",borderRadius:6,background:C.amber,border:"none",color:"#fff",fontFamily:FM,fontSize:13,cursor:"pointer",fontWeight:700}}>SAVE CHANGES</button>
+                            <button onClick={()=>setEditingCand(null)} style={{padding:"8px 16px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.muted,fontFamily:FM,fontSize:13,cursor:"pointer"}}>CANCEL</button>
                           </div>
                         </div>
                       )}
                     </div>
                   );
                 })}
+
                 {myCandidates.length===0 && (
-                  <div style={{background:C.card,border:`1px dashed ${C.border}`,borderRadius:8,padding:32,textAlign:"center",fontSize:11,color:C.muted}}>
-                    No candidates yet. Upload resumes to get started.
+                  <div style={{background:C.card,border:`1px dashed ${C.border}`,borderRadius:10,padding:40,textAlign:"center",color:C.muted}}>
+                    <div style={{fontSize:32,opacity:0.15,marginBottom:10}}>○</div>
+                    <div style={{fontSize:15,marginBottom:6}}>No candidates yet</div>
+                    <div style={{fontSize:13,marginBottom:16}}>Upload resumes to get started</div>
+                    <button onClick={()=>setTab("upload")} style={{padding:"8px 20px",borderRadius:6,background:C.amber,border:"none",color:"#fff",fontFamily:FM,fontSize:13,cursor:"pointer",fontWeight:700}}>⬆ UPLOAD RESUMES →</button>
                   </div>
                 )}
               </div>
