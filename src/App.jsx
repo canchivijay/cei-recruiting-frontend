@@ -2057,13 +2057,12 @@ export default function App() {
               ) : (
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   {candidates.filter(c=>c.source==="ai").map(c=>{
-                    const job = jobs.find(j=>j.id===c.jobId);
-                    const rec = RECRUITERS.find(r=>r.id===c.recruiterId);
-                    const sm  = STATUS_META[c.interviewStatus]||STATUS_META.pending;
-                    const recColor = rec?.color || C.muted;
-                    const recInitials = rec?.initials || ini(c.recruiterId||"?");
-                    const recObj = recruiters.find(r=>r.id===c.recruiterId);
-                    const rColor = recObj?.color||C.muted;
+                    const job    = jobs.find(j=>j.id===c.jobId);
+                    const sm     = STATUS_META[c.interviewStatus]||STATUS_META.pending;
+
+                    // ✅ FIX: Use recruiters state (lowercase) — RECRUITERS (uppercase) was undefined
+                    const recObj = recruiters.find(r => r.id === c.recruiterId);
+                    const rColor = recObj?.color || C.muted;
 
                     return (
                       <div key={c.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
