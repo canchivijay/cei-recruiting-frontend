@@ -130,7 +130,7 @@ async function parseResume(base64, jobId, jobs) {
   const primarySkills   = (job?.skills || []).join(", ") || "not specified";
   const secondarySkills = (job?.secondarySkills || []).join(", ") || "none";
 
-  if (!GROQ_API_KEY || GROQ_API_KEY === "YOUR_GROQ_API_KEY_HERE") {
+  if (!GROQ_API_KEY || GROQ_API_KEY === "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") {
     throw new Error("Groq API key not configured. Get your free key at console.groq.com → API Keys. Then update GROQ_API_KEY at the top of App.jsx.");
   }
 
