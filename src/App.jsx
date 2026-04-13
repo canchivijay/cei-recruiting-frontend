@@ -88,109 +88,116 @@ const INTERVIEW_LEVELS = [
 ];
 
 // ─── AI Parser — Gemini direct (no backend needed) ───────────────────────────
-const GEMINI_KEY = "AIzaSyDh6Ll6t0JlN8tfQIeW8TkqrjO94wwpHMo";
+// ─── API Configuration ───────────────────────────────────────────────────────
+// Groq — completely free, no credit card needed
+// Get your key at: console.groq.com → API Keys → Create (takes 30 seconds)
+const GROQ_API_KEY = "YOUR_GROQ_API_KEY_HERE";
 
+// ─── PDF Text Extractor using pdf.js (loaded from CDN) ───────────────────────
+async function extractTextFromPDF(base64) {
+  if (!window.pdfjsLib) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        resolve();
+      };
+      script.onerror = () => reject(new Error("Failed to load pdf.js"));
+      document.head.appendChild(script);
+    });
+  }
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  let fullText = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+  }
+  if (!fullText.trim()) {
+    throw new Error("No text found in PDF. File may be scanned/image-only. Use text-based PDFs from Naukri or LinkedIn.");
+  }
+  return fullText;
+}
+
+// ─── AI Resume Parser — Groq LLaMA (FREE, no credit card) ────────────────────
 async function parseResume(base64, jobId, jobs) {
-  const job = jobs.find(j=>j.id===jobId);
-  const primarySkills   = (job?.skills||[]).join(", ") || "not specified";
-  const secondarySkills = (job?.secondarySkills||[]).join(", ") || "none";
+  const job = jobs.find(j => j.id === jobId);
+  const primarySkills   = (job?.skills || []).join(", ") || "not specified";
+  const secondarySkills = (job?.secondarySkills || []).join(", ") || "none";
 
-  const prompt = `You are an expert HR resume screening assistant. Analyze this resume against the job requirements below.
+  if (!GROQ_API_KEY || GROQ_API_KEY === "YOUR_GROQ_API_KEY_HERE") {
+    throw new Error("Groq API key not configured. Get your free key at console.groq.com → API Keys. Then update GROQ_API_KEY at the top of App.jsx.");
+  }
 
+  // Step 1: Extract text from PDF client-side using pdf.js
+  const resumeText = await extractTextFromPDF(base64);
+
+  // Step 2: Build the analysis prompt
+  const prompt = `You are an expert HR resume screening assistant. Analyze the resume text and return a JSON evaluation.
+
+JOB REQUIREMENTS:
 ROLE: ${job?.title || "Not specified"}
 DEPARTMENT: ${job?.dept || "Not specified"}
 PRIMARY SKILLS (must-have): ${primarySkills}
 SECONDARY SKILLS (good-to-have): ${secondarySkills}
 RESPONSIBILITIES: ${job?.responsibilities || "Not specified"}
 
+RESUME TEXT (extracted from PDF):
+${resumeText.slice(0, 6000)}
+
 INSTRUCTIONS:
-- Analyze resumes in Word and PDF formats for hiring or HR professionals
-- Verify exact match between required skills in the job description and skills listed in the resume
-- Focus on primary skills as specified in the job description and the resume skills section
-- Rate each skill based on presence and relevance, and provide an overall fit assessment
-- Consider years of experience, education, and certifications
-- Present results in a clear, concise summary for easy decision-making
-- Do not process resumes in languages other than English
-- Respond only to resume evaluation and skill matching
-- Always communicate in English
-- CRITICAL: You MUST extract the candidate name from the top of the resume. Look for it in the header, title, or first line. Never return "Unknown" for name.
-- CRITICAL: Extract email (look for @ symbol), phone (look for digits with spaces/dashes), location (look for city/state near top)
+- Extract ALL candidate details from the resume text
+- CRITICAL: The candidate name is at the very top of the resume — extract it exactly as written
+- CRITICAL: Extract email (contains @ symbol), phone number, and location/city
+- Verify exact match between required skills and skills mentioned in resume
+- Rate each skill: exact match, partial match, or missing
+- Calculate primaryMatchPct as (matched primary skills / total primary skills) * 100
+- Rate overall fitScore 0-100 based on skills, experience, and role match
+- Respond only in English
 
-Return ONLY this JSON object, nothing else, no markdown, no backticks:
-{
-  "name": "EXTRACT the candidate full name exactly as written at top of resume - this is CRITICAL",
-  "email": "email address extracted from resume or null",
-  "phone": "phone/mobile number with country code if present or null",
-  "location": "city, state/country extracted from resume or null",
-  "currentRole": "most recent job title",
-  "currentCompany": "most recent employer name or null",
-  "totalExp": "X years Y months",
-  "skills": ["up to 10 skills found in resume"],
-  "education": [
-    {"degree": "degree name", "institution": "college/university name", "year": "graduation year or null", "specialization": "field of study or null"}
-  ],
-  "certifications": ["list of certifications found or empty array"],
-  "languages": ["languages known or empty array"],
-  "summary": "2 sentence professional summary",
-  "fitScore": <overall 0-100 fit score>,
-  "fitReason": "1 sentence overall fit explanation",
-  "skillMatch": [
-    {"skill": "skill name", "required": true, "found": true, "relevance": "exact|partial|missing", "note": "brief note"}
-  ],
-  "primarySkillsMatched": <number of primary skills found>,
-  "primarySkillsTotal": <total number of primary skills required>,
-  "primaryMatchPct": <0-100 percentage of primary skills matched>,
-  "secondaryMatchPct": <0-100 percentage of secondary skills matched>,
-  "experienceMatch": "exceeds|meets|below",
-  "strengths": ["2-3 key strengths relevant to the role"],
-  "redFlags": ["concerns or empty array"],
-  "recommendation": "shortlist|consider|reject"
-}`;
+Return ONLY a valid JSON object, no markdown fences, no explanation, no text before or after:
+{"name":"full name","email":"email or null","phone":"phone or null","location":"city/state or null","currentRole":"job title","currentCompany":"employer or null","totalExp":"X years","skills":["skill1","skill2"],"education":[{"degree":"","institution":"","year":"","specialization":""}],"certifications":[],"languages":[],"summary":"2 sentences","fitScore":75,"fitReason":"1 sentence","skillMatch":[{"skill":"","required":true,"found":true,"relevance":"exact","note":""}],"primarySkillsMatched":3,"primarySkillsTotal":5,"primaryMatchPct":60,"secondaryMatchPct":50,"experienceMatch":"meets","strengths":["strength1"],"redFlags":[],"recommendation":"consider"}`;
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { inline_data: { mime_type: "application/pdf", data: base64 } },
-          { text: prompt }
-        ]}]
-      })
-    }
-  );
+  // Step 3: Call Groq API (free, fast, no credit card needed)
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: 2048,
+    }),
+  });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0,200)}`);
+    throw new Error(`Groq API error ${res.status}: ${errText.slice(0, 300)}`);
   }
 
   const d = await res.json();
+  const txt = d.choices?.[0]?.message?.content;
+  if (!txt) throw new Error("Groq returned no response. Please try again.");
 
-  // Check for Gemini API-level errors
-  if (d.error) {
-    throw new Error(`Gemini error: ${d.error.message || JSON.stringify(d.error)}`);
-  }
+  // Extract JSON object from response
+  const jsonMatch = txt.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Could not parse JSON from Groq response.");
+  const parsed = JSON.parse(jsonMatch[0]);
 
-  const txt = d.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!txt) {
-    const reason = d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || "No text returned";
-    throw new Error(`Gemini returned no text. Reason: ${reason}`);
-  }
-
-  // Strip markdown fences and parse JSON
-  const clean = txt.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim();
-  const parsed = JSON.parse(clean);
-
-  // Validate — if name is still missing/Unknown, try to extract from raw text
-  if (!parsed.name || parsed.name === "Unknown" || parsed.name.includes("EXTRACT")) {
-    throw new Error("Could not extract candidate name from resume. Please ensure the PDF is not password-protected or image-only.");
+  if (!parsed.name || parsed.name.length < 2 || parsed.name === "Unknown") {
+    throw new Error("Could not extract candidate name. Ensure PDF is not scanned/image-only.");
   }
 
   return parsed;
 }
-
 // ─── CSV Report Generator ─────────────────────────────────────────────────────
 function generateCSV(candidates, interviews, jobs, recruiters) {
   const rows = [];
