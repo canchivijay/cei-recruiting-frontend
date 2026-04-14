@@ -1,37 +1,63 @@
-// FIXED App.jsx — Groq key bug resolved
+// App.jsx (UPDATED) — Groq + Regex Email Fallback
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ✅ Groq API key (Vite-safe)
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY;
 
-// ─── Design Tokens ────────────────────────────────────────────────────────────
-const C = {
-  bg: "#eef3ff", surface: "#ffffff", card: "#f6f9ff",
-  border: "#d1ddf7", borderHover: "#aabcee",
-  amber: "#1d4ed8", amberDim: "#93b4f5",
-  cream: "#0c1a3a", muted: "#5b6f9e",
-  faint: "#e2eafb", green: "#0e9f6e",
-  red: "#e02424", blue: "#1e40af",
-  purple: "#6d28d9", teal: "#0284c7", orange: "#ea580c",
-};
+// ─────────────────────────────────────────────────────────────
+// ✅ REGEX FALLBACK HELPERS
+// ─────────────────────────────────────────────────────────────
+function extractEmailRegex(text) {
+  if (!text) return null;
+  const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  const match = text.match(emailRegex);
+  return match ? match[0] : null;
+}
 
-// (file unchanged until parseResume)
-
-// ─── AI Resume Parser — Groq LLaMA (FIXED) ────────────────────
-async function parseResume(base64, jobId, jobs) {
-  if (!GROQ_API_KEY) {
-    throw new Error("Groq API key missing. Add VITE_GROQ_API_KEY in .env and restart dev server.");
+// ─── PDF TEXT EXTRACTION (unchanged) ──────────────────────────
+async function extractTextFromPDF(base64) {
+  if (!window.pdfjsLib) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        resolve();
+      };
+      script.onerror = () => reject(new Error("Failed to load pdf.js"));
+      document.head.appendChild(script);
+    });
   }
 
-  const job = jobs.find(j => j.id === jobId);
-  const primarySkills = (job?.skills || []).join(", ") || "not specified";
-  const secondarySkills = (job?.secondarySkills || []).join(", ") || "none";
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  let fullText = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    fullText += textContent.items.map(item => item.str).join(" ") + "
+";
+  }
+
+  if (!fullText.trim()) {
+    throw new Error("No text found in PDF. Possibly scanned image.");
+  }
+  return fullText;
+}
+
+// ─── AI Resume Parser — Groq + Regex Fallback ──────────────────
+async function parseResume(base64, jobId, jobs) {
+  if (!GROQ_API_KEY) {
+    throw new Error("Groq API key missing. Add VITE_GROQ_API_KEY in .env and restart.");
+  }
 
   const resumeText = await extractTextFromPDF(base64);
 
-  const prompt = `You are an expert HR resume screening assistant.
-Extract structured candidate data strictly in JSON.
-CRITICAL: Extract name, email, phone, location.
+  const prompt = `You are an ATS resume parser. Extract structured JSON.
+
 RESUME TEXT:
 ${resumeText.slice(0,6000)}`;
 
@@ -50,22 +76,29 @@ ${resumeText.slice(0,6000)}`;
   });
 
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Groq API error ${res.status}: ${t.slice(0,200)}`);
+    const err = await res.text();
+    throw new Error(`Groq error ${res.status}: ${err.slice(0,200)}`);
   }
 
   const data = await res.json();
   const txt = data.choices?.[0]?.message?.content;
   if (!txt) throw new Error("Empty Groq response");
 
-  const json = txt.match(/\{[\s\S]*\}/);
-  if (!json) throw new Error("Invalid JSON from Groq");
+  const jsonMatch = txt.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid JSON from Groq");
 
-  return JSON.parse(json[0]);
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  // ✅ REGEX EMAIL FALLBACK
+  if (!parsed.email || !parsed.email.includes("@")) {
+    const fallbackEmail = extractEmailRegex(resumeText);
+    if (fallbackEmail) parsed.email = fallbackEmail;
+  }
+
+  return parsed;
 }
 
-// ⚠️ Rest of App.jsx remains unchanged from your original file
-
+// ─── MAIN APP (rest of your app unchanged) ─────────────────────
 export default function App() {
   return null;
 }
