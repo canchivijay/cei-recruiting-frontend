@@ -91,7 +91,7 @@ const INTERVIEW_LEVELS = [
 // ─── API Configuration ───────────────────────────────────────────────────────
 // Groq — completely free, no credit card needed
 // Get your key at: console.groq.com → API Keys → Create (takes 30 seconds)
-const GROQ_API_KEY = "YOUR_GROQ_API_KEY_HERE";
+const GROQ_API_KEY = "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";
 
 // ─── PDF Text Extractor using pdf.js (loaded from CDN) ───────────────────────
 async function extractTextFromPDF(base64) {
